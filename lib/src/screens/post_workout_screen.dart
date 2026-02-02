@@ -29,8 +29,6 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
   @override
   void initState() {
     super.initState();
-    // Start measuring recovery if just finished
-    // Start measuring recovery if just finished
     // Recovery tracking removed as per request
     // WidgetsBinding.instance.addPostFrameCallback((_) {
     //   if (!widget.isFromHistory) {
@@ -117,14 +115,26 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
               const SizedBox(height: 32),
 
               // 2. Stats Grid
+              // Row 1
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   _statItem("AVG BPM",
                       "${widget.session.averageBpm.toStringAsFixed(0)}"),
                   _statItem("PEAK BPM", "${widget.session.peakBpm}"),
-                  _statItem("DURATION",
-                      "${(widget.session.heartRateReadings.length / 60).toStringAsFixed(1)}m"),
+                ],
+              ),
+              const SizedBox(height: 24),
+              // Row 2
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _statItem(
+                      "DURATION",
+                      _formatDuration(widget.session.durationSeconds ??
+                          (widget.session.heartRateReadings.length))),
+                  _statItem("CARDIO LOAD",
+                      "${widget.session.cardioLoad?.toString() ?? '-'}"),
                 ],
               ),
 
@@ -266,5 +276,19 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
         Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
       ],
     );
+  }
+
+  String _formatDuration(int totalSeconds) {
+    if (totalSeconds < 60) {
+      return "${totalSeconds}s";
+    }
+    final int min = totalSeconds ~/ 60;
+    final int sec = totalSeconds % 60;
+
+    if (sec == 0) {
+      return "${min}m";
+    }
+    // Compact format to avoid overflow in layout
+    return "${min}m${sec}s";
   }
 }

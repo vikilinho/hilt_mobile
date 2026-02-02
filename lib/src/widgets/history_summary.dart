@@ -40,7 +40,7 @@ class HistorySummary extends StatelessWidget {
                 gradeA > 0 ? "A" : (gradeB > 0 ? "B" : "C")),
             Container(width: 1, height: 40, color: Colors.grey.shade300),
             _buildStatItem(
-                context, "LAST", _getLastDate(sessions.first.timestamp)),
+                context, "LAST", _getLastDate(sessions.last.timestamp)),
           ],
         ),
       ),

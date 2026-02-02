@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' as dart_math;
+
 import 'package:flutter/foundation.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:isar/isar.dart';
@@ -20,7 +20,6 @@ class WearableDataLayer {
 
 class WorkoutManager extends ChangeNotifier {
   WorkoutEngine? _engine;
-  Timer? _simulationTimer; // Simulator Enabled for Testing
 
   // State for Grade Calculation
   int _workIntervalsTotalTime = 0;
@@ -34,6 +33,9 @@ class WorkoutManager extends ChangeNotifier {
       StreamController<WorkoutSession>.broadcast();
   Stream<WorkoutSession> get onSessionComplete =>
       _sessionCompleteController.stream;
+
+  // Real-time BPM Stream for Engine
+  final _bpmController = StreamController<int>.broadcast();
 
   // Recovery
   StreamSubscription? _recoverySubscription;
@@ -66,6 +68,9 @@ class WorkoutManager extends ChangeNotifier {
       _checkTargetHit(bpm);
     }
 
+    // Feed the engine real-time data
+    _bpmController.add(bpm);
+
     // Recovery Phase
     if (_recoverySubscription != null) {
       // We are in recovery mode.
@@ -90,14 +95,12 @@ class WorkoutManager extends ChangeNotifier {
     _recoverySubscription?.cancel();
     _recoverySubscription = null;
 
-    final bpmStream =
-        Stream.periodic(const Duration(seconds: 1), (_) => _currentBpm);
-
     _engine = WorkoutEngine(
       profile: _currentProfile,
-      bpmStream: bpmStream,
+      bpmStream: _bpmController.stream,
     );
 
+    _workoutStartTime = DateTime.now();
     _lowIntensitySeconds = 0;
 
     _workoutStateSubscription = _engine!.workoutState.listen((state) {
@@ -113,18 +116,7 @@ class WorkoutManager extends ChangeNotifier {
     _engine!.start();
     _currentSessionReadings.clear();
 
-    // Simulation Enabled for Emulator Testing
-    _simulationTimer?.cancel();
-    _simulationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      // Simulate BPM between 120 and 160 roughly
-      // Use logic to make it look somewhat natural
-      final base = 130;
-      final variance = 30;
-      final time = DateTime.now().millisecondsSinceEpoch / 1000;
-      // Sine wave simulation
-      final simulated = base + (dart_math.sin(time / 5) * variance).toInt();
-      _updateBpm(simulated);
-    });
+    // Simulation logic removed for production
   }
 
   Future<WorkoutSession?> stopWorkout({bool save = true}) async {
@@ -134,7 +126,7 @@ class WorkoutManager extends ChangeNotifier {
 
     // 2. Stop Engine
     _engine?.stop();
-    _simulationTimer?.cancel();
+
     WakelockPlus.disable();
     _engine = null;
     _lastState = null;
@@ -168,6 +160,36 @@ class WorkoutManager extends ChangeNotifier {
           .length;
     }
 
+    // Calculate Cardio Load
+    double cardioLoad = 0.0;
+    if (_currentSessionReadings.isNotEmpty) {
+      double totalPoints = 0;
+      final target = _currentProfile.targetHeartRate.toDouble();
+
+      for (final bpm in _currentSessionReadings) {
+        final pct = bpm / target;
+        if (pct >= 1.0) {
+          totalPoints += 5.0; // Extreme
+        } else if (pct >= 0.9) {
+          totalPoints += 4.0; // Very Hard
+        } else if (pct >= 0.8) {
+          totalPoints += 3.0; // Hard
+        } else if (pct >= 0.7) {
+          totalPoints += 2.0; // Moderate
+        } else if (pct >= 0.6) {
+          totalPoints += 1.0; // Light
+        } else {
+          totalPoints += 0.0; // Very Light
+        }
+      }
+      // Normalize: Points per minute
+      // Since readings are roughly 1 per second (depending on update rate),
+      // we divide total points by 60 to get a "Load unit" comparable to TRIMP-like scores over minutes.
+      // Adjust this divisor if update rate is not 1Hz.
+      // Assuming _updateBpm is called ~1Hz from watch.
+      cardioLoad = totalPoints / 60.0;
+    }
+
     String grade = 'C';
     if (_workIntervalsTotalTime > 0) {
       final pct = _workIntervalsTimeInZone / _workIntervalsTotalTime;
@@ -184,7 +206,11 @@ class WorkoutManager extends ChangeNotifier {
       ..peakBpm = peak
       ..timeInTargetZone = inZone
       ..grade = grade
-      ..endingBpm = _endingBpm;
+      ..cardioLoad = double.parse(cardioLoad.toStringAsFixed(1))
+      ..endingBpm = _endingBpm
+      ..durationSeconds = _workoutStartTime != null
+          ? DateTime.now().difference(_workoutStartTime!).inSeconds
+          : null;
 
     try {
       await _repo?.saveSession(session);
@@ -326,7 +352,7 @@ class WorkoutManager extends ChangeNotifier {
     } catch (e) {
       print("[Storage] Error loading history: $e");
     }
-    _history = _history.reversed.toList();
+    _history = _history.toList();
     notifyListeners();
   }
 
@@ -344,6 +370,7 @@ class WorkoutManager extends ChangeNotifier {
   DateTime? get lastHeartRateTime => _lastHeartRateTime;
 
   DateTime? _lastHeartRateTime;
+  DateTime? _workoutStartTime;
 
   // Restore Missing Fields and Constructor
   SportProfile _currentProfile = FootballLibrary.warmup;
@@ -381,6 +408,7 @@ class WorkoutManager extends ChangeNotifier {
     WatchConnectivity().messageStream.listen((message) {
       if (message.containsKey('bpm')) {
         final bpm = message['bpm'] as int;
+        print("[Mobile] Received BPM: $bpm");
         _updateBpm(bpm);
       }
     });

@@ -71,12 +71,12 @@ class HistoryItemCard extends StatelessWidget {
                                     e.key.toDouble(), e.value.toDouble()))
                                 .toList(),
                             isCurved: true,
-                            color: Colors.blueGrey, // Subtle BlueGrey
+                            color: Colors.blueAccent, // Subtle BlueGrey
                             barWidth: 3,
                             dotData: FlDotData(show: false),
                             belowBarData: BarAreaData(
                               show: true,
-                              color: Colors.blueGrey,
+                              color: Colors.green,
                             ),
                           ),
                         ],
@@ -112,7 +112,7 @@ class HistoryItemCard extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          DateFormat.jm().format(session.timestamp),
+                          _formatTimestamp(session.timestamp),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: Colors.grey.shade500,
                           ),
@@ -193,7 +193,20 @@ class HistoryItemCard extends StatelessWidget {
   String _formatDuration(int seconds) {
     final m = (seconds / 60).floor();
     final s = seconds % 60;
-    return "${m}m ${s}s";
+    return "${m}m${s}s";
+  }
+
+  String _formatTimestamp(DateTime timestamp) {
+    final now = DateTime.now();
+    final isToday = now.year == timestamp.year &&
+        now.month == timestamp.month &&
+        now.day == timestamp.day;
+
+    if (isToday) {
+      return DateFormat.jm().format(timestamp);
+    } else {
+      return DateFormat.MMMd().format(timestamp);
+    }
   }
 
   Color _getGradeColor(String? grade) {
