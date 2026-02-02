@@ -24,7 +24,7 @@ class HiltMobileApp extends StatelessWidget {
         title: 'Hilt Mobile',
         theme: ThemeData(
           useMaterial3: true,
-          colorSchemeSeed: Colors.green,
+          colorSchemeSeed: Colors.teal,
           brightness: Brightness.light,
           textTheme: GoogleFonts.interTextTheme(),
         ),
