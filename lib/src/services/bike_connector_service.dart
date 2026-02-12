@@ -3,7 +3,14 @@ import 'package:flutter_ftms/flutter_ftms.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum BikeConnectionStatus { disconnected, scanning, connecting, connected }
+enum BikeConnectionStatus {
+  disconnected,
+  scanning,
+  connecting,
+  connected,
+  bluetoothOff,
+  unauthorized
+}
 
 class BikeConnectorService {
   BluetoothDevice? _connectedDevice;
@@ -18,6 +25,21 @@ class BikeConnectorService {
 
   BikeConnectorService() {
     _statusController.add(_status);
+    _initBluetoothMonitor();
+  }
+
+  void _initBluetoothMonitor() {
+    FlutterBluePlus.adapterState.listen((state) {
+      if (state == BluetoothAdapterState.off) {
+        _updateStatus(BikeConnectionStatus.bluetoothOff);
+      } else if (state == BluetoothAdapterState.unauthorized) {
+        _updateStatus(BikeConnectionStatus.unauthorized);
+      } else if (state == BluetoothAdapterState.on &&
+          (_status == BikeConnectionStatus.bluetoothOff ||
+              _status == BikeConnectionStatus.unauthorized)) {
+        _updateStatus(BikeConnectionStatus.disconnected);
+      }
+    });
   }
 
   Future<void> requestPermissions() async {
@@ -33,7 +55,8 @@ class BikeConnectorService {
     await requestPermissions();
 
     if (_status == BikeConnectionStatus.scanning ||
-        _status == BikeConnectionStatus.connecting) {
+        _status == BikeConnectionStatus.connecting ||
+        _status == BikeConnectionStatus.connected) {
       return;
     }
 
@@ -41,6 +64,7 @@ class BikeConnectorService {
 
     StreamSubscription? scanSubscription;
     bool found = false;
+    final completer = Completer<void>();
 
     try {
       // 1. Listen to results
@@ -59,21 +83,33 @@ class BikeConnectorService {
           if (isTarget) {
             found = true;
             await scanSubscription?.cancel();
-            // Stop scanning before connecting
             await FlutterBluePlus.stopScan();
-            await connect(device);
+
+            try {
+              await connect(device);
+              if (!completer.isCompleted) completer.complete();
+            } catch (e) {
+              print("Connect error in callback: $e");
+              // If connection fails, we might want to resume scan?
+              // For now, just fail.
+              if (!completer.isCompleted) completer.completeError(e);
+            }
             break;
           }
         }
       });
 
-      // 2. Start Broad Scan (No filters)
+      // 2. Start Broad Scan
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
 
-      // 3. Timeout
-      await Future.delayed(const Duration(seconds: 10));
+      // 3. Wait for either connection or timeout
+      await Future.any([
+        completer.future,
+        Future.delayed(const Duration(seconds: 10)),
+      ]);
+
       if (!found) {
-        await scanSubscription.cancel();
+        await scanSubscription?.cancel();
         if (_status != BikeConnectionStatus.connected) {
           _updateStatus(BikeConnectionStatus.disconnected);
         }

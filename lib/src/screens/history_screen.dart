@@ -34,52 +34,58 @@ class HistoryScreen extends StatelessWidget {
 
     final grouped = _groupSessions(sessions);
 
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: HistorySummary(sessions: sessions),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.only(bottom: 24),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final entry = grouped[index];
-                if (entry is String) {
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 24, 16, 8),
-                    child: Text(
-                      entry.toUpperCase(),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey.shade500,
-                            letterSpacing: 1.2,
-                          ),
-                    ),
-                  );
-                } else if (entry is WorkoutSession) {
-                  return HistoryItemCard(
-                    session: entry,
-                    onDismissed: () => manager.deleteSession(entry.id),
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => PostWorkoutSummaryScreen(
-                            session: entry,
-                            isFromHistory: true,
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                }
-                return const SizedBox.shrink();
-              },
-              childCount: grouped.length,
+    return SafeArea(
+      child: CustomScrollView(
+        slivers: [
+          const SliverToBoxAdapter(child: SizedBox(height: 20)),
+          SliverToBoxAdapter(
+            child: HistorySummary(sessions: sessions),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.only(bottom: 24),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final entry = grouped[index];
+                  if (entry is String) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 24, 16, 8),
+                      child: Text(
+                        entry.toUpperCase(),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade500,
+                              letterSpacing: 1.2,
+                            ),
+                      ),
+                    );
+                  } else if (entry is WorkoutSession) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0), // 8px Gap
+                      child: HistoryItemCard(
+                        session: entry,
+                        onDismissed: () => manager.deleteSession(entry.id),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => PostWorkoutSummaryScreen(
+                                session: entry,
+                                isFromHistory: true,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+                childCount: grouped.length,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

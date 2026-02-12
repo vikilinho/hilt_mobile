@@ -27,10 +27,11 @@ class HistorySummary extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.all(16),
-      elevation: 4,
+      elevation: 4, // Increased elevation
+      shadowColor: Colors.black.withOpacity(0.2),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(24.0), // Increased padding
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
@@ -40,7 +41,7 @@ class HistorySummary extends StatelessWidget {
                 gradeA > 0 ? "A" : (gradeB > 0 ? "B" : "C")),
             Container(width: 1, height: 40, color: Colors.grey.shade300),
             _buildStatItem(
-                context, "LAST", _getLastDate(sessions.last.timestamp)),
+                context, "LAST", _getLastDate(sessions.first.timestamp)),
           ],
         ),
       ),
@@ -49,7 +50,10 @@ class HistorySummary extends StatelessWidget {
 
   String _getLastDate(DateTime date) {
     final now = DateTime.now();
-    final diff = now.difference(date).inDays;
+    final today = DateTime(now.year, now.month, now.day);
+    final aDate = DateTime(date.year, date.month, date.day);
+    final diff = today.difference(aDate).inDays;
+
     if (diff == 0) return "Today";
     if (diff == 1) return "Yesterday";
     return "$diff days ago";
@@ -60,17 +64,20 @@ class HistorySummary extends StatelessWidget {
       children: [
         Text(
           value,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                // Increased size
+                fontWeight: FontWeight.w900, // Extra Bold
                 color: Colors.black87,
+                fontSize: 28, // Explicit size increase
               ),
         ),
         const SizedBox(height: 4),
         Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Colors.grey.shade600,
-                letterSpacing: 1.2,
+                color: const Color(0xFF4A4A4A), // Tactile Dark Grey
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.bold,
               ),
         ),
       ],

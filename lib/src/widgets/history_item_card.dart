@@ -19,6 +19,10 @@ class HistoryItemCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final gradeColor = _getGradeColor(session.grade);
+    final isStrength = _isStrengthSession(session);
+    final categoryColor = isStrength
+        ? Colors.blue
+        : const Color(0xFF00E676); // Electric Blue or Neon Green
 
     return Dismissible(
       key: ValueKey(session.id),
@@ -31,135 +35,127 @@ class HistoryItemCard extends StatelessWidget {
         child: const Icon(Icons.delete_outline, color: Colors.white, size: 30),
       ),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        margin: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 4), // Adjusted vertical margin
+        clipBehavior: Clip.antiAlias, // Ensure neat corners with accent bar
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: Colors.black.withOpacity(0.05), // Subtle opacity
+              blurRadius: 4, // 4px blur
+              offset: const Offset(0, 2),
             ),
           ],
         ),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Stack(
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Background Chart (Subtle)
-              Positioned.fill(
-                child: Opacity(
-                  opacity:
-                      0.1, // Increased slightly for visibility if we change color
+              // Left Accent Bar
+              Container(
+                width: 5,
+                color: gradeColor,
+              ),
+              // Main Content
+              Expanded(
+                child: InkWell(
+                  onTap: onTap,
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 40),
-                    child: LineChart(
-                      LineChartData(
-                        lineTouchData: const LineTouchData(
-                            enabled: false), // Disable interaction
-                        gridData: FlGridData(show: false),
-                        titlesData: FlTitlesData(show: false),
-                        borderData: FlBorderData(show: false),
-                        lineBarsData: [
-                          LineChartBarData(
-                            spots: session.heartRateReadings
-                                .asMap()
-                                .entries
-                                .map((e) => FlSpot(
-                                    e.key.toDouble(), e.value.toDouble()))
-                                .toList(),
-                            isCurved: true,
-                            color: Colors.blueAccent, // Subtle BlueGrey
-                            barWidth: 3,
-                            dotData: FlDotData(show: false),
-                            belowBarData: BarAreaData(
-                              show: true,
-                              color: Colors.green,
+                    padding:
+                        const EdgeInsets.all(12.0), // 12px Internal Padding
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header: Pill
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: categoryColor,
+                                borderRadius:
+                                    BorderRadius.circular(4), // 4px Radius
+                              ),
+                              alignment: Alignment.center, // Center text
+                              child: Text(
+                                _deriveSessionLabel(session),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  fontWeight: FontWeight.bold, // Bold
+                                  color: Colors.white, // White text
+                                  letterSpacing: 1.0,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Stats Row (Grade + Data)
+                        Row(
+                          children: [
+                            // Grade Badge
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: gradeColor, width: 3),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                session.grade ?? '-',
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  color: gradeColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+
+                            // Data Stats
+                            Expanded(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment
+                                    .spaceAround, // Distribute evenly
+                                children: [
+                                  _buildStat(context, "AVG BPM",
+                                      _sanitizeBpm(session.averageBpm)),
+                                  _buildStat(context, "PEAK",
+                                      "${_sanitizeInt(session.peakBpm)}"),
+                                  _buildStat(
+                                      context,
+                                      "IN ZONE",
+                                      _formatDuration(
+                                          session.timeInTargetZone)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Footer: Timestamp
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Text(
+                              _formatTimestamp(session.timestamp),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: Colors.grey.shade400,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 10,
+                              ),
                             ),
                           ),
-                        ],
-                        minY: 0,
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ),
-
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            session.sportType.name.toUpperCase(),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey.shade800,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          _formatTimestamp(session.timestamp),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.grey.shade500,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Main Stats
-                    Row(
-                      children: [
-                        // Grade Badge
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            // color: gradeColor.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: gradeColor, width: 4),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            session.grade ?? '-',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: gradeColor,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-
-                        // Text Stats
-                        Expanded(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                            children: [
-                              _buildStat(context, "AVG BPM",
-                                  "${session.averageBpm.round()}"),
-                              _buildStat(context, "PEAK", "${session.peakBpm}"),
-                              _buildStat(context, "IN ZONE",
-                                  _formatDuration(session.timeInTargetZone)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                 ),
               ),
             ],
@@ -171,12 +167,12 @@ class HistoryItemCard extends StatelessWidget {
 
   Widget _buildStat(BuildContext context, String label, String value) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           value,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w800, // Bold
+                fontSize: 16,
               ),
         ),
         Text(
@@ -190,10 +186,51 @@ class HistoryItemCard extends StatelessWidget {
     );
   }
 
+  bool _isStrengthSession(WorkoutSession session) {
+    if (session.peakStrengthScore != null && session.peakStrengthScore! > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  String _deriveSessionLabel(WorkoutSession session) {
+    // 1. If we have a Strength Score, it was a Strength Session
+    if (_isStrengthSession(session)) {
+      return "STRENGTH";
+    }
+
+    // 2. Otherwise map SportType to meaningful labels
+    switch (session.sportType) {
+      case SportType.cycling:
+        return "CYCLING";
+      case SportType.boxing:
+        return "BOXING";
+      case SportType.custom:
+        return "TRAINING";
+      case SportType.football:
+      default:
+        // User requested "Cardio" for non-strength
+        return "CARDIO";
+    }
+  }
+
+  String _sanitizeBpm(double val) {
+    if (val.isNaN || val.isInfinite || val > 300 || val < 0) return "-";
+    return "${val.round()}";
+  }
+
+  int _sanitizeInt(int val) {
+    if (val > 300 || val < 0) return 0;
+    return val;
+  }
+
   String _formatDuration(int seconds) {
-    final m = (seconds / 60).floor();
-    final s = seconds % 60;
-    return "${m}m${s}s";
+    if (seconds > 86400 || seconds < 0) return "-"; // Sanity check
+    final info = Duration(seconds: seconds);
+    if (info.inMinutes > 60) {
+      return "${info.inHours}h ${info.inMinutes % 60}m";
+    }
+    return "${info.inMinutes}m ${info.inSeconds % 60}s";
   }
 
   String _formatTimestamp(DateTime timestamp) {
@@ -210,8 +247,9 @@ class HistoryItemCard extends StatelessWidget {
   }
 
   Color _getGradeColor(String? grade) {
-    if (grade == 'A') return const Color(0xFF4CAF50); // Green
-    if (grade == 'B') return const Color(0xFFFFC107); // Amber
-    return const Color(0xFFF44336); // Red
+    if (grade == 'A') return const Color(0xFF00E676); // Neon Green
+    if (grade == 'B') return Colors.amber; // Gold
+    if (grade == 'C') return Colors.deepOrange; // Orange
+    return Colors.grey; // Default/Null
   }
 }

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'src/workout_manager.dart';
 import 'src/screens/dashboard_screen.dart';
 import 'src/screens/history_screen.dart';
+import 'src/screens/workout_selection_screen.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 
@@ -44,29 +45,33 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
 
-  final _screens = const [
-    DashboardScreen(),
-    HistoryScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("HILT KING"),
-        leading: _index != 0
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () => setState(() => _index = 0),
-              )
-            : null,
+      body: IndexedStack(
+        index: _index,
+        children: [
+          DashboardScreen(
+            onRequestWorkoutSelection: () => setState(() => _index = 1),
+          ),
+          SafeArea(
+            child: WorkoutSelectionScreen(
+              onWorkoutStarted: () => setState(() => _index = 0),
+              isVisible: _index == 1,
+            ),
+          ),
+          SafeArea(
+            child: HistoryScreen(),
+          ),
+        ],
       ),
-      body: _screens[_index],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.timer), label: 'Timer'),
+          NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
+          NavigationDestination(
+              icon: Icon(Icons.fitness_center), label: 'Workouts'),
           NavigationDestination(icon: Icon(Icons.history), label: 'History'),
         ],
       ),

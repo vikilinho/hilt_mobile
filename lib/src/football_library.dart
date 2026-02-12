@@ -1,13 +1,474 @@
 import 'package:hilt_core/hilt_core.dart';
 
 class FootballLibrary {
-  static List<SportProfile> get presets => [
+  static List<SportProfile> get footballPresets => [
         impactSub,
         warmup,
         boxToBox,
         matchSim,
         preSeason,
       ];
+
+  static List<SportProfile> get strengthPresets => [];
+
+  // Combined for legacy or all-access if needed
+  static List<SportProfile> get allPresets => [
+        ...footballPresets,
+        ...strengthPresets,
+      ];
+  static List<SportProfile> getStrengthPresetsForGear(GarageGear gear) {
+    if (gear == GarageGear.barbell) {
+      return [matchPrimer, explosivePower, strengthEngine, iron90];
+    }
+    if (gear == GarageGear.dumbbells) {
+      return [dbGobletSquat, dbLunges, dbOverheadPress, dbRDL];
+    }
+    if (gear == GarageGear.bench) {
+      return [benchDips, bulgarianSplitSquats, benchStepUps, benchLegRaises];
+    }
+    if (gear == GarageGear.noEquipment) {
+      return [airSquats, walkingLunges, burpees, mountainClimbers];
+    }
+    return [];
+  }
+
+  static List<SportProfile> get bikePresets => [
+        impactSub.copyWith(gear: GarageGear.bike),
+        warmup.copyWith(gear: GarageGear.bike),
+        boxToBox.copyWith(gear: GarageGear.bike),
+        matchSim.copyWith(gear: GarageGear.bike),
+        preSeason.copyWith(gear: GarageGear.bike),
+      ];
+
+  static List<SportProfile> get treadmillPresets => [
+        matchEngine,
+        tempoPitch,
+        blitzFinish,
+      ];
+
+  // --- Treadmill Presets ---
+
+  static SportProfile get matchEngine => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.treadmill,
+        workDuration: 0,
+        restDuration: 0,
+        targetHeartRate: 145,
+        displayName: 'Match Engine',
+        blocks: [
+          WorkoutBlock(
+            label: 'Steady State',
+            workSeconds: 2700, // 45 Minutes
+            restSeconds: 0,
+            iterations: 1,
+            targetBpm: 145,
+            coachAudio: 'treadmill_steady', // Generic steady state
+          ),
+        ],
+      );
+
+  static SportProfile get tempoPitch => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.treadmill,
+        workDuration: 0,
+        restDuration: 0,
+        targetHeartRate: 155,
+        displayName: 'Tempo Pitch',
+        blocks: [
+          WorkoutBlock(
+            label: 'Tempo Run',
+            workSeconds: 1200, // 20 Minutes
+            restSeconds: 0,
+            iterations: 1,
+            targetBpm: 155,
+            coachAudio: 'treadmill_steady',
+          ),
+        ],
+      );
+
+  static SportProfile get blitzFinish => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.treadmill,
+        workDuration: 0,
+        restDuration: 0,
+        targetHeartRate: 165,
+        displayName: 'Blitz Finish',
+        blocks: [
+          WorkoutBlock(
+            label: 'Max Effort',
+            workSeconds: 60, // 1 Minute Intervals
+            restSeconds: 0,
+            iterations: 5, // 5 Intervals = 5 Minutes
+            targetBpm: 165,
+            coachAudio: 'blitz_finish_interval', // Special cue
+          ),
+        ],
+      );
+
+  // --- Barbell Presets ---
+
+  static SportProfile get matchPrimer => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.barbell,
+        workDuration: 0,
+        restDuration: 90,
+        targetHeartRate: 140,
+        displayName: 'Clean Press (5m)',
+        animationAsset: 'assets/animations/Power Clean.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Clean Press',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 3,
+            targetBpm: 145,
+            animationAsset: 'assets/animations/Power Clean.json',
+          ),
+        ],
+      );
+
+  static SportProfile get explosivePower => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.barbell,
+        workDuration: 0,
+        restDuration: 90,
+        targetHeartRate: 145,
+        displayName: 'Explosive Power (15m)',
+        animationAsset: 'assets/animations/Barbell Lunges.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Barbell Back Squat',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 3,
+            targetBpm: 145,
+            animationAsset: 'assets/animations/backsquat.json',
+          ),
+          WorkoutBlock(
+            label: 'Barbell Push Press',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 3,
+            targetBpm: 150,
+            animationAsset: 'assets/animations/push_press.json',
+          ),
+        ],
+      );
+
+  static SportProfile get strengthEngine => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.barbell,
+        workDuration: 0,
+        restDuration: 90,
+        targetHeartRate: 150,
+        displayName: 'Strength Engine (30m)',
+        animationAsset: 'assets/animations/deadlift.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Barbell Back Squat',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 5,
+            targetBpm: 150,
+            animationAsset: 'assets/animations/backsquat.json',
+          ),
+          WorkoutBlock(
+            label: 'Barbell Deadlift',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 5,
+            targetBpm: 155,
+            animationAsset: 'assets/animations/deadlift.json',
+          ),
+        ],
+      );
+
+  static SportProfile get iron90 => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.barbell,
+        workDuration: 0,
+        restDuration: 90,
+        targetHeartRate: 155,
+        displayName: 'The Iron 90 (45m)',
+        animationAsset: 'assets/animations/backsquat.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Barbell Back Squat',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 4,
+            targetBpm: 150,
+            animationAsset: 'assets/animations/backsquat.json',
+          ),
+          WorkoutBlock(
+            label: 'Power Clean',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 4,
+            targetBpm: 155,
+            animationAsset: 'assets/animations/Power Clean.json',
+          ),
+          WorkoutBlock(
+            label: 'Barbell Deadlift',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 4,
+            targetBpm: 155,
+            animationAsset: 'assets/animations/deadlift.json',
+          ),
+          WorkoutBlock(
+            label: 'Barbell Push Press',
+            workSeconds: 0,
+            restSeconds: 90,
+            iterations: 4,
+            targetBpm: 150,
+            animationAsset: 'assets/animations/push_press.json',
+          ),
+        ],
+      );
+
+  // --- Dumbbell Presets ---
+
+  static SportProfile get dbGobletSquat => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.dumbbells,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155, // 150+ for Grade A
+        displayName: 'Dumbbell Goblet Squat',
+        animationAsset: 'assets/animations/dumbellsquat.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Dumbbell Goblet Squat',
+            workSeconds: 60,
+            restSeconds: 60,
+            iterations: 3,
+            targetBpm: 155,
+          ),
+        ],
+      );
+
+  static SportProfile get dbLunges => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.dumbbells,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155,
+        displayName: 'Dumbbell Lunges',
+        animationAsset: 'assets/animations/dumbelllunges.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Dumbbell Lunges',
+            workSeconds: 60,
+            restSeconds: 60,
+            iterations: 4,
+            targetBpm: 155,
+            coachAudio: 'switch_legs_halfway', // Logic in WorkoutManager
+          ),
+        ],
+      );
+
+  static SportProfile get dbOverheadPress => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.dumbbells,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155,
+        displayName: 'Dumbbell Overhead Press',
+        animationAsset: 'assets/animations/dumbelloverheadpress.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Dumbbell Overhead Press',
+            workSeconds: 45,
+            restSeconds: 60,
+            iterations: 3,
+            targetBpm: 155,
+          ),
+        ],
+      );
+
+  static SportProfile get dbRDL => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.dumbbells,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155,
+        displayName: 'Dumbbell Romanian Deadlift',
+        animationAsset: 'assets/animations/dumbellRomania.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Dumbbell Romanian Deadlift',
+            workSeconds: 60,
+            restSeconds: 60,
+            iterations: 3,
+            targetBpm: 155,
+          ),
+        ],
+      );
+
+  // --- Bench Presets ---
+
+  static SportProfile get benchDips => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.bench,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155,
+        displayName: 'Bench Dips',
+        animationAsset: 'assets/animations/Bench Dips.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Bench Dips',
+            workSeconds: 45,
+            restSeconds: 60,
+            iterations: 3,
+            targetBpm: 155,
+          ),
+        ],
+      );
+
+  static SportProfile get bulgarianSplitSquats => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.bench,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155,
+        displayName: 'Bulgarian Split Squats',
+        animationAsset: 'assets/animations/Bulgarian Split Squats.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Bulgarian Split Squats',
+            workSeconds: 60,
+            restSeconds: 60,
+            iterations: 3,
+            targetBpm: 155,
+            coachAudio: 'switch_legs_halfway',
+          ),
+        ],
+      );
+
+  static SportProfile get benchStepUps => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.bench,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155,
+        displayName: 'Bench Step-Ups',
+        animationAsset: 'assets/animations/Bench Step-Ups.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Bench Step-Ups',
+            workSeconds: 60,
+            restSeconds: 60,
+            iterations: 4,
+            targetBpm: 155,
+            coachAudio: 'switch_legs_halfway',
+          ),
+        ],
+      );
+
+  static SportProfile get benchLegRaises => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.bench,
+        workDuration: 0,
+        restDuration: 60,
+        targetHeartRate: 155,
+        displayName: 'Bench Leg Raises',
+        animationAsset: 'assets/animations/Bench Leg Raises.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Bench Leg Raises',
+            workSeconds: 45,
+            restSeconds: 60,
+            iterations: 3,
+            targetBpm: 155,
+          ),
+        ],
+      );
+
+  // --- No-Equipment / Bodyweight Presets ---
+
+  static SportProfile get airSquats => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.noEquipment,
+        workDuration: 45,
+        restDuration: 30,
+        targetHeartRate: 130,
+        displayName: 'Air Squats',
+        animationAsset: 'assets/animations/Air Squats.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Air Squats',
+            workSeconds: 45,
+            restSeconds: 30,
+            iterations: 4,
+            targetBpm: 130,
+            animationAsset: 'assets/animations/Air Squats.json',
+          ),
+        ],
+      );
+
+  static SportProfile get walkingLunges => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.noEquipment,
+        workDuration: 45,
+        restDuration: 30,
+        targetHeartRate: 130,
+        displayName: 'Walking Lunges',
+        animationAsset: 'assets/animations/Walking Lunges.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Walking Lunges',
+            workSeconds: 45,
+            restSeconds: 30,
+            iterations: 4,
+            targetBpm: 130,
+            animationAsset: 'assets/animations/Walking Lunges.json',
+          ),
+        ],
+      );
+
+  static SportProfile get burpees => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.noEquipment,
+        workDuration: 45,
+        restDuration: 40,
+        targetHeartRate: 130,
+        displayName: 'Burpees',
+        animationAsset: 'assets/animations/Burpees.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Burpees',
+            workSeconds: 45,
+            restSeconds: 40,
+            iterations: 4,
+            targetBpm: 130,
+            animationAsset: 'assets/animations/Burpees.json',
+          ),
+        ],
+      );
+
+  static SportProfile get mountainClimbers => const SportProfile(
+        type: SportType.football,
+        gear: GarageGear.noEquipment,
+        workDuration: 45,
+        restDuration: 35,
+        targetHeartRate: 130,
+        displayName: 'Mountain Climbers',
+        animationAsset: 'assets/animations/Mountain Climbers.json',
+        blocks: [
+          WorkoutBlock(
+            label: 'Mountain Climbers',
+            workSeconds: 45,
+            restSeconds: 35,
+            iterations: 4,
+            targetBpm: 130,
+            animationAsset: 'assets/animations/Mountain Climbers.json',
+          ),
+        ],
+      );
+
+  // --- Football Presets ---
 
   static SportProfile get impactSub => const SportProfile(
         type: SportType.football,
@@ -69,35 +530,30 @@ class FootballLibrary {
         targetHeartRate: 155,
         displayName: 'Match Sim (45m)',
         blocks: [
-          // 1. First Half: 20m. Assuming standard 30/30 for now as not specified, or 15/15 like 2nd half?
-          // Request said "Phase 2 intervals must be 15s Sprint / 15s Rest".
-          // Implicitly Phase 1 might be standard or different?
-          // Let's make First Half 30/30 (Standard) -> 20m = 20 iterations
+          // First Half: 20m (30s work/30s rest)
           WorkoutBlock(
             label: 'First Half',
             workSeconds: 30,
             restSeconds: 30,
-            iterations: 20, // 20m
+            iterations: 20,
             targetBpm: 155,
           ),
-          // 2. Half Time: 5m Low Intensity. 1 iteration of 0 work / 300 rest?
-          // Or Work with low target? Let's do 5m Rest.
+          // Half Time: 5m (0s work/300s rest)
           WorkoutBlock(
             label: 'Half Time',
             workSeconds: 0,
-            restSeconds: 300, // 5m
+            restSeconds: 300,
             iterations: 1,
             targetBpm: 110,
             coachAudio: 'half_time',
           ),
-          // 3. Second Half: 20m. 15s/15s.
-          // 15+15=30s cycle. 20m * 60 / 30 = 40 iterations.
+          // Second Half: 20m (15s work/15s rest)
           WorkoutBlock(
             label: 'Second Half',
             workSeconds: 15,
             restSeconds: 15,
             iterations: 40,
-            targetBpm: 160, // Maybe higher intensity?
+            targetBpm: 160,
             coachAudio: 'match_sim_half',
           ),
         ],
