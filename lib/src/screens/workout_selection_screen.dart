@@ -396,15 +396,76 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
   }
 
   Widget _buildDrillList() {
-    if (_categoryTitle.contains("Bike")) {
-      return Column(
-        children: [
-          _buildBikeConnectionStatus(),
-          Expanded(child: _buildListItems()),
-        ],
-      );
-    }
-    return _buildListItems();
+    final manager = context.watch<WorkoutManager>();
+    return Column(
+      children: [
+        if (_categoryTitle.contains("Bike")) _buildBikeConnectionStatus(),
+        Expanded(child: _buildListItems()),
+        if (manager.workoutQueue.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              top: false,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          "COMBO QUEUE",
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade600),
+                        ),
+                        Text(
+                          manager.workoutQueue
+                              .map((e) => e.displayName)
+                              .join(" + "),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 14),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00897B),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                    ),
+                    onPressed: () {
+                      if (widget.isSelectionMode) {
+                        Navigator.pop(context);
+                      } else {
+                        manager.startWorkout();
+                        widget.onWorkoutStarted();
+                      }
+                    },
+                    child: const Text("START"),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildBikeConnectionStatus() {
@@ -491,6 +552,9 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
       itemCount: _currentList.length,
       itemBuilder: (context, index) {
         final profile = _currentList[index];
+        final manager = context.watch<WorkoutManager>();
+        final isInQueue = manager.workoutQueue.contains(profile);
+
         return ListTile(
           leading: Icon(
             profile.isStrength ? Icons.fitness_center : Icons.sports_soccer,
@@ -502,7 +566,6 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
               : "${profile.blocks.length} Blocks"),
           onTap: () {
             // Start the workout!
-            final manager = context.read<WorkoutManager>();
             manager.loadPreset(profile);
 
             if (widget.isSelectionMode) {
@@ -513,7 +576,25 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
               widget.onWorkoutStarted();
             }
           },
-          trailing: const Icon(Icons.chevron_right),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(
+                  isInQueue ? Icons.check_circle : Icons.add_circle_outline,
+                  color: isInQueue ? const Color(0xFF00897B) : Colors.grey,
+                ),
+                onPressed: () {
+                  if (isInQueue) {
+                    manager.removeFromCombo(profile);
+                  } else {
+                    manager.addToCombo(profile);
+                  }
+                },
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
         );
       },
     );

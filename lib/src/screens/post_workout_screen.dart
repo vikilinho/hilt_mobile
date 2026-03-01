@@ -65,10 +65,15 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
     final targetBpm = manager.profile.targetHeartRate.toDouble();
     const hiltTeal = Color(0xFF00897B);
 
+    final isCombo = widget.session.comboNames != null &&
+        widget.session.comboNames!.isNotEmpty;
+    final titleText = isCombo ? "COMBO REPORT" : "MATCH REPORT";
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("MATCH REPORT",
-            style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+        title: Text(titleText,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, letterSpacing: 1.2)),
         centerTitle: true,
         automaticallyImplyLeading: false,
         actions: [
@@ -110,6 +115,49 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                         horizontal: 24, vertical: 16),
                     children: [
                       const SizedBox(height: 10),
+                      if (isCombo)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Text(
+                                "COMBO SEQUENCE",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey.shade600,
+                                  letterSpacing: 2.0,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 8,
+                                runSpacing: 8,
+                                children:
+                                    widget.session.comboNames!.map((name) {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withOpacity(0.05),
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Text(
+                                      name.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ),
+                        ),
                       // 1. Header Hierarchy (Grade + Output)
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -372,6 +420,8 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
     const dividerThickness = 1.0;
 
     final isTreadmill = widget.session.distance != null;
+    final isCombo = widget.session.comboNames != null &&
+        widget.session.comboNames!.isNotEmpty;
 
     return Container(
       decoration: BoxDecoration(
@@ -409,13 +459,56 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
               children: [
                 Expanded(
                     child: _statItem(
-                        "DURATION",
+                        isCombo ? "COMBO TIME" : "DURATION",
                         _formatDuration(widget.session.durationSeconds ??
                             widget.session.heartRateReadings.length))),
                 VerticalDivider(color: subtleDivider, width: dividerThickness),
                 Expanded(
-                    child: _statItem("CARDIO LOAD",
-                        widget.session.cardioLoad?.toStringAsFixed(1) ?? "-")),
+                  child: Builder(builder: (context) {
+                    final val = widget.session.cardioLoad;
+                    final isElite = val != null && val >= 5.0;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24.0),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                val?.toStringAsFixed(1) ?? "-",
+                                style: TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: isElite
+                                      ? const Color(0xFF00897B)
+                                      : Colors.black,
+                                  fontFamily: 'Serif',
+                                ),
+                              ),
+                              if (isElite) ...[
+                                const SizedBox(width: 4),
+                                const Icon(Icons.local_fire_department,
+                                    color: Colors.deepOrange, size: 24),
+                              ]
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            isElite ? "ELITE ENGINE" : "CARDIO LOAD",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isElite
+                                  ? const Color(0xFF00897B)
+                                  : const Color(0xFF333333),
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
               ],
             ),
           ),

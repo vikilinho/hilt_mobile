@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:isar/isar.dart';
 import 'package:path_provider/path_provider.dart';
@@ -62,6 +63,19 @@ class WorkoutManager extends ChangeNotifier {
   double get currentSpeedMph => _currentSpeedMph;
   double get bikeDistanceMiles => _bikeDistanceMiles;
   List<int> get currentSessionReadings => _currentSessionReadings;
+
+  // Queue for Sequential Combos
+  final List<SportProfile> _workoutQueue = [];
+  List<SportProfile> get workoutQueue => _workoutQueue;
+  int _currentQueueIndex = 0;
+  bool _isComboTransitioning = false;
+  bool get isComboTransitioning => _isComboTransitioning;
+
+  // Track combo transition times for the Match Report
+  final List<int> _comboTransitionSeconds = [];
+  List<int> get comboTransitionSeconds => _comboTransitionSeconds;
+
+  bool get isComboSession => _workoutQueue.length > 1;
 
   // Treadmill Speed/Distance Tracking (from Watch)
   final TreadmillHandler _treadmillHandler = TreadmillHandler();
@@ -197,31 +211,35 @@ class WorkoutManager extends ChangeNotifier {
 
   // ...
 
-  void startWorkout() {
+  void startWorkout({bool isAutoAdvance = false}) {
     // Keep screen on
     WakelockPlus.enable();
 
-    // Reset Grade/Recovery/Strength State
-    _workIntervalsTotalTime = 0;
-    _workIntervalsTimeInZone = 0;
-    _endingBpm = null;
-    _recoveryScore = null;
-    _totalVolume = 0.0;
-    _peakStrengthScore = 0.0;
-    _currentSetInBlock = 0; // Reset set counter
-    _recoverySubscription?.cancel();
-    _recoverySubscription = null;
+    if (!isAutoAdvance) {
+      // Reset Grade/Recovery/Strength State (Only on initial start)
+      _workIntervalsTotalTime = 0;
+      _workIntervalsTimeInZone = 0;
+      _endingBpm = null;
+      _recoveryScore = null;
+      _totalVolume = 0.0;
+      _peakStrengthScore = 0.0;
+      _currentSetInBlock = 0;
+      _recoverySubscription?.cancel();
+      _recoverySubscription = null;
+      _treadmillHandler.reset();
+      _workoutStartTime = DateTime.now();
+      _lowIntensitySeconds = 0;
+      _currentSessionReadings.clear();
+      _comboTransitionSeconds.clear();
+    }
 
-    // Reset Treadmill State
-    _treadmillHandler.reset();
+    _isComboTransitioning = false;
+    notifyListeners();
 
     _engine = WorkoutEngine(
       profile: _currentProfile,
       bpmStream: _bpmController.stream,
     );
-
-    _workoutStartTime = DateTime.now();
-    _lowIntensitySeconds = 0;
 
     _workoutStateSubscription = _engine!.workoutState.listen((state) {
       // Reset set counter when advancing to a new block
@@ -233,15 +251,45 @@ class WorkoutManager extends ChangeNotifier {
       _lastState = state;
       notifyListeners();
     }, onDone: () {
-      // Auto-Save when engine finishes
-      print("[Mobile] Workout Finished. Auto-saving...");
-      stopWorkout(save: true);
+      if (_workoutQueue.isNotEmpty &&
+          _currentQueueIndex < _workoutQueue.length - 1) {
+        _advanceToNextExercise();
+      } else {
+        // Auto-Save when final engine finishes
+        print("[Mobile] Workout Finished. Auto-saving...");
+        stopWorkout(save: true);
+      }
     });
 
     _engine!.start();
-    _currentSessionReadings.clear();
+  }
 
-    // Simulation logic removed for production
+  void _advanceToNextExercise() async {
+    await _workoutStateSubscription?.cancel();
+    _workoutStateSubscription = null;
+    _engine?.stop();
+
+    // Record transition time
+    if (_workoutStartTime != null) {
+      _comboTransitionSeconds
+          .add(DateTime.now().difference(_workoutStartTime!).inSeconds);
+    }
+
+    _isComboTransitioning = true;
+    notifyListeners(); // Trigger UI fade-in/fade-out for combo header
+
+    // Trigger haptics to alert user
+    HapticFeedback.heavyImpact();
+    await Future.delayed(const Duration(milliseconds: 200));
+    HapticFeedback.heavyImpact();
+
+    _currentQueueIndex++;
+    _currentProfile = _workoutQueue[_currentQueueIndex];
+    print("[Mobile] Auto-advancing to: ${_currentProfile.displayName}");
+
+    // Slight delay to allow UI to show transition before clock starts
+    await Future.delayed(const Duration(seconds: 1));
+    startWorkout(isAutoAdvance: true);
   }
 
   Future<WorkoutSession?> stopWorkout({bool save = true}) async {
@@ -258,6 +306,8 @@ class WorkoutManager extends ChangeNotifier {
 
     _endingBpm = _currentBpm;
     _hasUserSelectedProfile = false; // Reset selection to return to Hub
+    _workoutQueue.clear();
+    _currentQueueIndex = 0;
 
     if (save) {
       final session = await _saveSession();
@@ -294,19 +344,26 @@ class WorkoutManager extends ChangeNotifier {
 
       for (final bpm in _currentSessionReadings) {
         final pct = bpm / target;
+        double points = 0.0;
+
         if (pct >= 1.0) {
-          totalPoints += 5.0; // Extreme
+          points = 5.0; // Extreme
         } else if (pct >= 0.9) {
-          totalPoints += 4.0; // Very Hard
+          points = 4.0; // Very Hard
         } else if (pct >= 0.8) {
-          totalPoints += 3.0; // Hard
+          points = 3.0; // Hard
         } else if (pct >= 0.7) {
-          totalPoints += 2.0; // Moderate
+          points = 2.0; // Moderate
         } else if (pct >= 0.6) {
-          totalPoints += 1.0; // Light
-        } else {
-          totalPoints += 0.0; // Very Light
+          points = 1.0; // Light
         }
+
+        // Cardio Load Sensitivity: Scale more aggressively during 150+ BPM intervals
+        if (bpm >= 150) {
+          points *= 1.5;
+        }
+
+        totalPoints += points;
       }
       // Normalize: Points per minute
       // Since readings are roughly 1 per second (depending on update rate),
@@ -317,48 +374,84 @@ class WorkoutManager extends ChangeNotifier {
     }
 
     String grade = 'C';
+    bool gradeOverridden = false;
 
-    // Barbell Grading Logic
-    if (_currentProfile.gear == GarageGear.barbell) {
-      // If HR stays above 140 during session (Average > 140)
-      if (avg >= 140) {
-        grade = 'B'; // Or logic for B/C
-      }
-    } else if (_currentProfile.gear == GarageGear.dumbbells) {
-      // Dumbbell Grading: High Intensity (150+)
-      if (avg >= 150) {
-        grade = 'A';
-      } else {
-        grade = 'B';
-      }
-    } else if (_currentProfile.gear == GarageGear.treadmill) {
-      // Treadmill Grading: 80% of time in target zone
-      // Calculation based on Total Workout Duration (excluding warmup if possible, but simplicity: Total Time)
-      // Or based on Work Intervals if defined.
-      // User Req: "80% of the duration"
-      // We'll use _workIntervalsTotalTime if > 0, else total session readings count.
-      int totalTime = _workIntervalsTotalTime > 0
-          ? _workIntervalsTotalTime
-          : _currentSessionReadings.length;
-      int zoneTime = _workIntervalsTimeInZone > 0
-          ? _workIntervalsTimeInZone
-          : inZone; // Fallback to all-session in-zone
+    // GRADING LOGIC OVERHAUL - Priority Checks
+    if (peak >= _currentProfile.targetHeartRate && cardioLoad >= 5.0) {
+      grade = 'A';
+      gradeOverridden = true;
+    } else if (peak >= (_currentProfile.targetHeartRate - 5) ||
+        cardioLoad >= 3.5) {
+      grade = 'B';
+      gradeOverridden = true;
+    }
 
-      if (totalTime > 0) {
-        final pct = zoneTime / totalTime;
-        if (pct >= 0.8) {
+    if (!gradeOverridden) {
+      // Barbell Grading Logic
+      if (_currentProfile.gear == GarageGear.barbell) {
+        // If HR stays above 140 during session (Average > 140)
+        if (avg >= 140) {
+          grade = 'B'; // Or logic for B/C
+        }
+      } else if (_currentProfile.gear == GarageGear.dumbbells) {
+        // Dumbbell Grading: High Intensity (150+)
+        if (avg >= 150) {
           grade = 'A';
-        } else if (pct >= 0.6) {
+        } else {
           grade = 'B';
         }
+      } else if (_currentProfile.gear == GarageGear.treadmill) {
+        // Treadmill Grading: 80% of time in target zone
+        // Calculation based on Total Workout Duration (excluding warmup if possible, but simplicity: Total Time)
+        // Or based on Work Intervals if defined.
+        // User Req: "80% of the duration"
+        // We'll use _workIntervalsTotalTime if > 0, else total session readings count.
+        int totalTime = _workIntervalsTotalTime > 0
+            ? _workIntervalsTotalTime
+            : _currentSessionReadings.length;
+        int zoneTime = _workIntervalsTimeInZone > 0
+            ? _workIntervalsTimeInZone
+            : inZone; // Fallback to all-session in-zone
+
+        if (totalTime > 0) {
+          final pct = zoneTime / totalTime;
+          if (pct >= 0.8) {
+            grade = 'A';
+          } else if (pct >= 0.6) {
+            grade = 'B';
+          }
+        }
+      } else {
+        // Existing Logic
+        if (_workIntervalsTotalTime > 0) {
+          final pct = _workIntervalsTimeInZone / _workIntervalsTotalTime;
+          if (pct >= 0.9)
+            grade = 'A';
+          else if (pct >= 0.7) grade = 'B';
+        }
       }
-    } else {
-      // Existing Logic
-      if (_workIntervalsTotalTime > 0) {
-        final pct = _workIntervalsTimeInZone / _workIntervalsTotalTime;
-        if (pct >= 0.9)
-          grade = 'A';
-        else if (pct >= 0.7) grade = 'B';
+    }
+
+    // Combo Transition Bonus Logic: Upgrades grade if HR maintained.
+    bool transitionBonus = false;
+    if (_comboTransitionSeconds.isNotEmpty && grade != 'A') {
+      transitionBonus = true;
+      for (final trSec in _comboTransitionSeconds) {
+        if (trSec < _currentSessionReadings.length) {
+          final bpmAtTr = _currentSessionReadings[trSec];
+          if (bpmAtTr < 150) {
+            transitionBonus = false;
+          }
+        }
+      }
+
+      if (transitionBonus) {
+        // Apply Bonus
+        if (grade == 'C')
+          grade = 'B';
+        else if (grade == 'B') grade = 'A';
+
+        cardioLoad += 0.5; // Bump Cardio Load slightly for transition intensity
       }
     }
 
@@ -374,6 +467,11 @@ class WorkoutManager extends ChangeNotifier {
       ..totalVolume = double.parse(_totalVolume.toStringAsFixed(1))
       ..peakStrengthScore = double.parse(_peakStrengthScore.toStringAsFixed(1))
       ..endingBpm = _endingBpm
+      ..comboNames = isComboSession
+          ? _workoutQueue.map((e) => e.displayName).toList()
+          : null
+      ..comboTransitionSeconds =
+          isComboSession ? List.from(_comboTransitionSeconds) : null
       ..durationSeconds = _workoutStartTime != null
           ? DateTime.now().difference(_workoutStartTime!).inSeconds
           : null
@@ -583,6 +681,39 @@ class WorkoutManager extends ChangeNotifier {
   void loadPreset(SportProfile profile) {
     _currentProfile = profile;
     _hasUserSelectedProfile = true;
+    _workoutQueue.clear();
+    _workoutQueue.add(profile);
+    _currentQueueIndex = 0;
+    notifyListeners();
+  }
+
+  void addToCombo(SportProfile profile) {
+    if (_workoutQueue.isEmpty) {
+      _currentProfile = profile;
+      _hasUserSelectedProfile = true;
+    }
+    _workoutQueue.add(profile);
+    notifyListeners();
+  }
+
+  void removeFromCombo(SportProfile profile) {
+    if (_workoutQueue.contains(profile)) {
+      final index = _workoutQueue.indexOf(profile);
+      _workoutQueue.removeAt(index);
+      if (_workoutQueue.isEmpty) {
+        _hasUserSelectedProfile = false;
+        _currentQueueIndex = 0;
+      } else if (index == 0) {
+        _currentProfile = _workoutQueue.first;
+      }
+      notifyListeners();
+    }
+  }
+
+  void clearCombo() {
+    _workoutQueue.clear();
+    _hasUserSelectedProfile = false;
+    _currentQueueIndex = 0;
     notifyListeners();
   }
 

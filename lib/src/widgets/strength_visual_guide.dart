@@ -66,10 +66,14 @@ class _StrengthVisualGuideState extends State<StrengthVisualGuide> {
           // Exercise Visual
           SizedBox(
             height: 250,
-            child: ExerciseVisual(
-              exerciseName: exerciseName,
-              isPulse: isPulse,
-              // Intentionally ommit assetPath to force lookup by exerciseName (Profile Name or Recovery)
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 500),
+              child: ExerciseVisual(
+                key: ValueKey(exerciseName),
+                exerciseName: exerciseName,
+                isPulse: isPulse,
+                // Intentionally ommit assetPath to force lookup by exerciseName (Profile Name or Recovery)
+              ),
             ),
           ),
         ],

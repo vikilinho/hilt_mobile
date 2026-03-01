@@ -75,15 +75,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
               backgroundColor: Colors.transparent,
               elevation: 0,
               centerTitle: true,
-              title: Text(
-                manager.profile.displayName.isNotEmpty
-                    ? (manager.profile.gear == GarageGear.treadmill
-                        ? "${manager.profile.displayName} (${manager.profile.blocks.fold(0, (p, b) => p + b.workSeconds * b.iterations + b.restSeconds * b.iterations) ~/ 60}M)"
-                            .toUpperCase()
-                        : manager.profile.displayName)
-                    : 'Workout',
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, color: Colors.black87),
+              title: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 500),
+                child: Column(
+                  key: ValueKey(manager.profile.displayName),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (manager.isComboSession)
+                      const Text(
+                        "COMBO SESSION",
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2),
+                      ),
+                    Text(
+                      manager.profile.displayName.isNotEmpty
+                          ? (manager.profile.gear == GarageGear.treadmill
+                              ? "${manager.profile.displayName} (${manager.profile.blocks.fold(0, (p, b) => p + b.workSeconds * b.iterations + b.restSeconds * b.iterations) ~/ 60}M)"
+                                  .toUpperCase()
+                              : manager.profile.displayName)
+                          : 'Workout',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.black87),
+                    ),
+                  ],
+                ),
               ),
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.black87),
