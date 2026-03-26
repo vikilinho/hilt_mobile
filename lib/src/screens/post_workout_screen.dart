@@ -422,6 +422,10 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
     final isTreadmill = widget.session.distance != null;
     final isCombo = widget.session.comboNames != null &&
         widget.session.comboNames!.isNotEmpty;
+    final isStepSession =
+        widget.session.steps != null && widget.session.steps! > 0;
+
+    if (isStepSession) return _buildStepStatsGrid(context, subtleDivider, dividerThickness);
 
     return Container(
       decoration: BoxDecoration(
@@ -761,6 +765,104 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
     }
 
     return calories;
+  }
+
+  /// ~0.04 kcal per step for an ~80kg person
+  double _calculateStepCalories() => (widget.session.steps ?? 0) * 0.04;
+
+  /// Average stride = 0.762m. Miles = steps × 0.762 / 1609
+  double _stepsToMiles() => (widget.session.steps ?? 0) * 0.000473;
+
+  Widget _buildStepStatsGrid(
+      BuildContext context, Color subtleDivider, double dividerThickness) {
+    const hiltTeal = Color(0xFF00897B);
+    final steps = widget.session.steps ?? 0;
+    final miles = _stepsToMiles();
+    final cals = _calculateStepCalories();
+    final cardioLoad = widget.session.cardioLoad;
+    final isElite = cardioLoad != null && cardioLoad >= 5.0;
+
+    return Container(
+      decoration: BoxDecoration(
+          border: Border(
+        top: BorderSide(color: subtleDivider, width: dividerThickness),
+        bottom: BorderSide(color: subtleDivider, width: dividerThickness),
+      )),
+      child: Column(
+        children: [
+          // Row 1: Total Steps | Miles Covered
+          IntrinsicHeight(
+            child: Row(
+              children: [
+                Expanded(
+                  child: _statItem("TOTAL STEPS", steps.toString()),
+                ),
+                VerticalDivider(
+                    color: subtleDivider, width: dividerThickness),
+                Expanded(
+                  child: _statItem(
+                      "MILES COVERED", miles.toStringAsFixed(2)),
+                ),
+              ],
+            ),
+          ),
+          Divider(color: subtleDivider, height: dividerThickness),
+          // Row 2: Calories | Cardio Load
+          IntrinsicHeight(
+            child: Row(
+              children: [
+                Expanded(
+                  child: _statItem(
+                      "CALORIES", cals.toStringAsFixed(0)),
+                ),
+                VerticalDivider(
+                    color: subtleDivider, width: dividerThickness),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24.0),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              cardioLoad?.toStringAsFixed(1) ?? "-",
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: isElite ? hiltTeal : Colors.black,
+                                fontFamily: 'Serif',
+                              ),
+                            ),
+                            if (isElite) ...[
+                              const SizedBox(width: 4),
+                              const Icon(Icons.local_fire_department,
+                                  color: Colors.deepOrange, size: 24),
+                            ]
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          isElite ? "ELITE ENGINE" : "CARDIO LOAD",
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isElite
+                                ? hiltTeal
+                                : const Color(0xFF333333),
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   String _formatDuration(int totalSeconds) {
