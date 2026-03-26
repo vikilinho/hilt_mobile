@@ -440,7 +440,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                         "${widget.session.averageBpm.toStringAsFixed(0)}")),
                 VerticalDivider(color: subtleDivider, width: dividerThickness),
                 Expanded(
-                    child: isTreadmill
+                    child: isTreadmill && widget.session.distance! > 0
                         ? _editableStatItem(
                             context,
                             "DISTANCE",
@@ -462,6 +462,10 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                         isCombo ? "COMBO TIME" : "DURATION",
                         _formatDuration(widget.session.durationSeconds ??
                             widget.session.heartRateReadings.length))),
+                VerticalDivider(color: subtleDivider, width: dividerThickness),
+                Expanded(
+                    child: _statItem(
+                        "CALORIES", _calculateCalories().toStringAsFixed(0))),
                 VerticalDivider(color: subtleDivider, width: dividerThickness),
                 Expanded(
                   child: Builder(builder: (context) {
@@ -736,6 +740,27 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
     if (grade == 'A') return const Color(0xFF00E676); // Neon Green
     if (grade == 'B') return Colors.amber; // Gold
     return Colors.deepOrange; // Red/Orange
+  }
+
+  double _calculateCalories() {
+    final durationMins = (widget.session.durationSeconds ??
+            widget.session.heartRateReadings.length) /
+        60.0;
+    if (durationMins <= 0) return 0.0;
+
+    final avgBpm = widget.session.averageBpm;
+    if (avgBpm <= 0) return 0.0;
+
+    // Formula: Calories = (Duration in minutes) * ((0.6309 * AverageBPM) - 33.1419) / 4.184
+    // Using default Male, Age 30, Weight 80kg
+    double calories = durationMins * ((0.6309 * avgBpm) - 33.1419) / 4.184;
+
+    // Ensure it doesn't drop below a resting metabolic rate (roughly 1.5 kcal/min for 80kg)
+    if (calories < (durationMins * 1.5)) {
+      calories = durationMins * 1.5;
+    }
+
+    return calories;
   }
 
   String _formatDuration(int totalSeconds) {

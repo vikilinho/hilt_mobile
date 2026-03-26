@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hilt_core/hilt_core.dart';
 import '../workout_manager.dart';
+import '../services/step_service.dart';
 
 import '../services/bike_connector_service.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -11,6 +12,7 @@ import '../widgets/heart_rate_pulse.dart';
 import '../widgets/strength_visual_guide.dart'; // Import library
 import '../widgets/equipment_selector.dart';
 import 'post_workout_screen.dart';
+import 'package:confetti/confetti.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback?
@@ -26,10 +28,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription? _sub;
   final _weightController = TextEditingController();
   final _repsController = TextEditingController();
+  late ConfettiController _confettiController;
 
   @override
   void initState() {
     super.initState();
+    _confettiController =
+        ConfettiController(duration: const Duration(seconds: 3));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _sub = context
           .read<WorkoutManager>()
@@ -38,20 +43,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
-  void _onSessionComplete(WorkoutSession session) {
+  void _onSessionComplete(WorkoutSession session) async {
     if (mounted) {
-      Navigator.of(context).push(
+      await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => PostWorkoutSummaryScreen(
             session: session,
           ),
         ),
       );
+
+      if (mounted) {
+        final manager = context.read<WorkoutManager>();
+        if (manager.history.length % 5 == 0 && manager.history.isNotEmpty) {
+          _confettiController.play();
+        }
+      }
     }
   }
 
   @override
   void dispose() {
+    _confettiController.dispose();
     _sub?.cancel();
     _weightController.dispose();
     _repsController.dispose();
@@ -61,6 +74,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<WorkoutManager>();
+    final stepService = context.watch<StepService>();
     final state = manager.workoutState;
     final profile = manager.profile;
 
@@ -136,576 +150,729 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             )
           : null, // No app bar when not in workout
-      body: AnimatedContainer(
-        duration: const Duration(seconds: 1),
-        color: pulseColor,
-        child: SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              24.0,
-              state == null ? 48.0 : 24.0, // Extra top padding when no app bar
-              24.0,
-              24.0,
-            ),
-            child: ListView(
-              children: [
-                // Back Button moved to AppBar
+      body: Stack(
+        children: [
+          AnimatedContainer(
+            duration: const Duration(seconds: 1),
+            color: pulseColor,
+            child: SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  24.0,
+                  state == null
+                      ? 48.0
+                      : 24.0, // Extra top padding when no app bar
+                  24.0,
+                  24.0,
+                ),
+                child: ListView(
+                  children: [
+                    // Back Button moved to AppBar
 
-                // Old Select Session Button Removed
+                    // Old Select Session Button Removed
 
-                const SizedBox(
-                    height: 56), // Increased spacing for visual breathing room
+                    const SizedBox(
+                        height:
+                            56), // Increased spacing for visual breathing room
 
-                // Bike Integration (Only if Bike is selected)
-                if (state == null && profile.gear == GarageGear.bike)
-                  StreamBuilder(
-                    stream: manager.bikeService.statusStream,
-                    initialData: manager.bikeService.status,
-                    builder: (context, snapshot) {
-                      final status = snapshot.data;
-                      final isConnected =
-                          status == BikeConnectionStatus.connected;
-                      final isScanning =
-                          status == BikeConnectionStatus.scanning ||
-                              status == BikeConnectionStatus.connecting;
+                    // Bike Integration (Only if Bike is selected)
+                    if (state == null && profile.gear == GarageGear.bike)
+                      StreamBuilder(
+                        stream: manager.bikeService.statusStream,
+                        initialData: manager.bikeService.status,
+                        builder: (context, snapshot) {
+                          final status = snapshot.data;
+                          final isConnected =
+                              status == BikeConnectionStatus.connected;
+                          final isScanning =
+                              status == BikeConnectionStatus.scanning ||
+                                  status == BikeConnectionStatus.connecting;
 
-                      return Column(
-                        children: [
-                          if (isConnected)
-                            const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.directions_bike,
-                                  color: Colors.green,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  "BIKE CONNECTED",
-                                  style: TextStyle(
-                                    color: Colors.green,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            )
-                          else if (status == BikeConnectionStatus.bluetoothOff)
-                            OutlinedButton.icon(
-                              onPressed: () =>
-                                  FlutterBluePlus.turnOn(), // Prompt to turn on
-                              icon: const Icon(Icons.bluetooth_disabled,
-                                  color: Colors.red),
-                              label: const Text("ENABLE BLUETOOTH",
-                                  style: TextStyle(color: Colors.red)),
-                            )
-                          else if (status == BikeConnectionStatus.unauthorized)
-                            OutlinedButton.icon(
-                              onPressed: () =>
-                                  openAppSettings(), // Open settings
-                              icon: const Icon(Icons.security,
-                                  color: Colors.orange),
-                              label: const Text("GRANT PERMISSIONS",
-                                  style: TextStyle(color: Colors.orange)),
-                            )
-                          else
-                            OutlinedButton.icon(
-                              onPressed:
-                                  isScanning ? null : manager.connectToBike,
-                              icon: isScanning
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.link),
-                              label: Text(
-                                isScanning ? "SCANNING..." : "CONNECT BIKE",
-                              ),
-                            ),
-                        ],
-                      );
-                    },
-                  ),
-
-                if (state == null && profile.gear == GarageGear.bike)
-                  const SizedBox(height: 24),
-
-                // Form Guide Animation (Strength Only)
-                if (state?.phase == WorkoutPhase.strengthWork ||
-                    state?.phase == WorkoutPhase.rest && profile.isStrength)
-                  StrengthVisualGuide(
-                    profile: profile,
-                    phase: state?.phase ?? WorkoutPhase.strengthWork,
-                    currentHeartRate: manager.currentBpm,
-                    currentAnimationAsset: state?.animationAsset,
-                    currentExerciseLabel: state?.blockLabel,
-                  ),
-
-                // Timer & Phase OR Weekly Goal Hub
-                if (state?.phase == WorkoutPhase.strengthWork)
-                  _buildStrengthInput(context, manager)
-                else if (state != null)
-                  // Active Workout Timer
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      SizedBox(
-                        width: 250,
-                        height: 250,
-                        child: CircularProgressIndicator(
-                          value: (state.currentPhaseDuration == 0)
-                              ? 0
-                              : state.timeRemaining /
-                                  state.currentPhaseDuration,
-                          strokeWidth: 20,
-                          backgroundColor: Colors.grey.shade200,
-                          color: state.phase == WorkoutPhase.rest
-                              ? Colors.blue
-                              : Colors.green,
-                        ),
-                      ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (profile.gear == GarageGear.treadmill &&
-                              state.phase != WorkoutPhase.rest) ...[
-                            // TREADMILL WORK PHASE: Show TARGET BPM
-                            Text(
-                              "TARGET BPM",
-                              style: Theme.of(context).textTheme.headlineSmall,
-                            ),
-                            Text(
-                              "${profile.targetHeartRate}",
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .displayLarge
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                          ] else ...[
-                            // REST / OTHER / NON-TREADMILL: Show Timer
-                            Text(
-                              state.phase.name.toUpperCase(),
-                              style: Theme.of(context).textTheme.headlineSmall,
-                            ),
-                            Text(
-                              "${state.timeRemaining}",
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .displayLarge
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                          ]
-                        ],
-                      ),
-                    ],
-                  )
-                else
-                // Weekly Goal Hub (Idle State)
-                // If Treadmill layout is active (check manager state/profile)
-                // Using profile.gear check since we are in idle state
-                if (profile.gear == GarageGear.treadmill &&
-                    manager.hasUserSelectedProfile)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 32.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 200,
-                          height: 200,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: const Color(0xFF00897B).withOpacity(0.2),
-                              width: 20,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                          return Column(
                             children: [
-                              Text(
-                                "TARGET BPM", // Label
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.grey[600],
-                                      letterSpacing: 1.2,
-                                    ),
-                              ),
-                              Text(
-                                "${profile.targetHeartRate}", // Value
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .displayLarge
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                      fontSize: 64,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  // Regular Weekly Goal Hub
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 32.0), // Centering Padding
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        SizedBox(
-                          width: 250,
-                          height: 250,
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween<double>(
-                                begin: 0, end: manager.weeklyProgressPercent),
-                            duration: const Duration(seconds: 1),
-                            builder: (context, value, _) =>
-                                CircularProgressIndicator(
-                              value: value,
-                              strokeWidth: 20,
-                              backgroundColor: Colors.grey.shade200,
-                              color: const Color(0xFF00897B),
-                              strokeCap: StrokeCap.round,
-                            ),
-                          ),
-                        ),
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _getWeeklyGoalLabel(
-                                  manager.weeklySessionsCompleted),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.grey[600],
-                                    letterSpacing: 1.2,
-                                  ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              "${manager.weeklySessionsCompleted} / ${manager.weeklyGoal}",
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .displayLarge
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                const SizedBox(height: 24), // Reduced from 32
-
-                // BPM (Hide during Rest as it's shown above)
-                if (state?.phase != WorkoutPhase.rest) ...[
-                  const SizedBox(height: 16),
-
-                  // Heart Rate Display
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Current BPM Pulse
-                      Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                "HEART RATE",
-                                style: Theme.of(context).textTheme.labelLarge,
-                              ),
-                              if (manager.lastHeartRateTime != null &&
-                                  DateTime.now()
-                                          .difference(
-                                              manager.lastHeartRateTime!)
-                                          .inSeconds <
-                                      5)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 8.0),
-                                  child: Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: const BoxDecoration(
+                              if (isConnected)
+                                const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.directions_bike,
                                       color: Colors.green,
-                                      shape: BoxShape.circle,
                                     ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      "BIKE CONNECTED",
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              else if (status ==
+                                  BikeConnectionStatus.bluetoothOff)
+                                OutlinedButton.icon(
+                                  onPressed: () => FlutterBluePlus
+                                      .turnOn(), // Prompt to turn on
+                                  icon: const Icon(Icons.bluetooth_disabled,
+                                      color: Colors.red),
+                                  label: const Text("ENABLE BLUETOOTH",
+                                      style: TextStyle(color: Colors.red)),
+                                )
+                              else if (status ==
+                                  BikeConnectionStatus.unauthorized)
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      openAppSettings(), // Open settings
+                                  icon: const Icon(Icons.security,
+                                      color: Colors.orange),
+                                  label: const Text("GRANT PERMISSIONS",
+                                      style: TextStyle(color: Colors.orange)),
+                                )
+                              else
+                                OutlinedButton.icon(
+                                  onPressed:
+                                      isScanning ? null : manager.connectToBike,
+                                  icon: isScanning
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.link),
+                                  label: Text(
+                                    isScanning ? "SCANNING..." : "CONNECT BIKE",
                                   ),
                                 ),
                             ],
-                          ),
-                          const SizedBox(height: 8),
-                          HeartRatePulse(
-                            bpm: manager.currentBpm,
-                            targetBpm: profile.targetHeartRate,
-                            isBelowTarget: state?.isBelowTarget ?? false,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-
-                // Session Stats (Time/Laps Left) - Only for Cardio
-                if (state != null && !profile.isStrength) ...[
-                  const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      Column(
-                        children: [
-                          Text(
-                            "TIME LEFT",
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                          Text(
-                            _formatDuration(state.workoutTimeRemaining),
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ],
-                      ),
-                      if (state.totalIntervalsInBlock > 0)
-                        Column(
-                          children: [
-                            Text(
-                              "LAPS LEFT",
-                              style: Theme.of(context).textTheme.labelSmall,
-                            ),
-                            Text(
-                              "${state.totalIntervalsInBlock - state.currentIntervalIndex + 1}",
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                ],
-
-                const SizedBox(height: 16), // Reduced from 24
-
-                // Bike/Treadmill Stats - Only for Cardio
-                if (state != null && !profile.isStrength) ...[
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      Column(
-                        children: [
-                          Text(
-                            "SPEED",
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                          Text(
-                            profile.gear == GarageGear.treadmill
-                                ? "${((manager.currentSpeedKmh ?? 0) * 0.621371).toStringAsFixed(1)} mph"
-                                : "${manager.currentSpeedMph.toStringAsFixed(1)} mph",
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ],
-                      ),
-                      Column(
-                        children: [
-                          Text(
-                            "DIST",
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                          Text(
-                            profile.gear == GarageGear.treadmill
-                                ? "${(manager.treadmillHandler.cumulativeDistanceMiles).toStringAsFixed(2)} miles"
-                                : "${manager.bikeDistanceMiles.toStringAsFixed(2)} miles",
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-
-                const SizedBox(height: 24),
-
-                // Equipment Selector
-                const SizedBox(height: 16),
-
-                // Equipment Status Pill (Triggers Modal)
-                // SHOW ONLY IF SESSION SELECTED (manager.hasUserSelectedProfile)
-                if (state == null && manager.hasUserSelectedProfile)
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.only(
-                          bottom: 16.0), // Reduced from 24
-                      child: InkWell(
-                        onTap: () {
-                          showModalBottomSheet(
-                            context: context,
-                            backgroundColor: Colors.white,
-                            shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.vertical(
-                                top: Radius.circular(20),
-                              ),
-                            ),
-                            builder: (context) => SafeArea(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                        24, 24, 24, 0),
-                                    child: Text(
-                                      "SELECT EQUIPMENT",
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.black87,
-                                          ),
-                                    ),
-                                  ),
-                                  EquipmentSelector(
-                                    selectedGear: manager.activeEquipment,
-                                    onEquipmentSelected: (gear) {
-                                      manager.setActiveEquipment(gear);
-                                      Navigator.pop(context);
-                                    },
-                                    showLabel: false,
-                                  ),
-                                  const SizedBox(height: 24),
-                                ],
-                              ),
-                            ),
                           );
                         },
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 10,
+                      ),
+
+                    if (state == null && profile.gear == GarageGear.bike)
+                      const SizedBox(height: 24),
+
+                    // Form Guide Animation (Strength Only)
+                    if (state?.phase == WorkoutPhase.strengthWork ||
+                        state?.phase == WorkoutPhase.rest && profile.isStrength)
+                      StrengthVisualGuide(
+                        profile: profile,
+                        phase: state?.phase ?? WorkoutPhase.strengthWork,
+                        currentHeartRate: manager.currentBpm,
+                        currentAnimationAsset: state?.animationAsset,
+                        currentExerciseLabel: state?.blockLabel,
+                      ),
+
+                    // Timer & Phase OR Weekly Goal Hub
+                    if (state?.phase == WorkoutPhase.strengthWork)
+                      _buildStrengthInput(context, manager)
+                    else if (state != null)
+                      // Active Workout Timer
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 250,
+                            height: 250,
+                            child: CircularProgressIndicator(
+                              value: (state.currentPhaseDuration == 0)
+                                  ? 0
+                                  : state.timeRemaining /
+                                      state.currentPhaseDuration,
+                              strokeWidth: 20,
+                              backgroundColor: Colors.grey.shade200,
+                              color: state.phase == WorkoutPhase.rest
+                                  ? Colors.blue
+                                  : Colors.green,
+                            ),
                           ),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: Colors.grey.shade300, width: 1),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
+                          Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(
-                                _getIconForGear(manager.activeEquipment),
-                                size: 18,
-                                color: Colors.black87,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                _getNameForGear(manager.activeEquipment)
-                                    .toUpperCase(),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                  color: Colors.black87,
+                              if (profile.gear == GarageGear.treadmill &&
+                                  state.phase != WorkoutPhase.rest) ...[
+                                // TREADMILL WORK PHASE: Show TARGET BPM
+                                Text(
+                                  "TARGET BPM",
+                                  style:
+                                      Theme.of(context).textTheme.headlineSmall,
                                 ),
-                              ),
+                                Text(
+                                  "${profile.targetHeartRate}",
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .displayLarge
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                              ] else ...[
+                                // REST / OTHER / NON-TREADMILL: Show Timer
+                                Text(
+                                  state.phase.name.toUpperCase(),
+                                  style:
+                                      Theme.of(context).textTheme.headlineSmall,
+                                ),
+                                Text(
+                                  "${state.timeRemaining}",
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .displayLarge
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                              ]
                             ],
                           ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // Controls
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton(
-                    onPressed: state == null
-                        ? () {
-                            // Dynamic Action:
-                            // If NO selection -> Go to Select Session Screen
-                            // If HAS selection -> Start Workout
-
-                            if (!manager.hasUserSelectedProfile) {
-                              widget.onRequestWorkoutSelection?.call();
-                            } else {
-                              manager.startWorkout();
-                            }
-                          }
-                        : () {
-                            showDialog(
-                              context: context,
-                              builder: (dialogContext) => AlertDialog(
-                                title: const Text("End Workout?"),
-                                content: const Text(
-                                  "Do you want to save this session to your history?",
+                        ],
+                      )
+                    else
+                    // Weekly Goal Hub (Idle State)
+                    // If Treadmill layout is active (check manager state/profile)
+                    // Using profile.gear check since we are in idle state
+                    if (profile.gear == GarageGear.treadmill &&
+                        manager.hasUserSelectedProfile)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 32.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 200,
+                              height: 200,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color:
+                                      const Color(0xFF00897B).withOpacity(0.2),
+                                  width: 20,
                                 ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.pop(dialogContext),
-                                    child: const Text("CANCEL"),
+                              ),
+                              alignment: Alignment.center,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    "TARGET BPM", // Label
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.grey[600],
+                                          letterSpacing: 1.2,
+                                        ),
                                   ),
-                                  TextButton(
-                                    onPressed: () {
-                                      manager.stopWorkout(save: false);
-                                      Navigator.pop(dialogContext);
-                                    },
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: Colors.red,
-                                    ),
-                                    child: const Text("DISCARD"),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () async {
-                                      // 1. Close Dialog
-                                      Navigator.pop(dialogContext);
-
-                                      // 2. Stop & Save
-                                      final session = await manager.stopWorkout(
-                                        save: true,
-                                      );
-
-                                      // 3. Navigate is handled by the stream listener 'onSessionComplete'
-                                      if (session != null) {
-                                        // Just close dialog, the listener will handle the rest
-                                      }
-                                    },
-                                    child: const Text("SAVE & END"),
+                                  Text(
+                                    "${profile.targetHeartRate}", // Value
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .displayLarge
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black87,
+                                          fontSize: 64,
+                                        ),
                                   ),
                                 ],
                               ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      // Regular Weekly Goal Hub
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 32.0), // Centering Padding
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            SizedBox(
+                              width: 250,
+                              height: 250,
+                              child: TweenAnimationBuilder<double>(
+                                tween: Tween<double>(
+                                    begin: 0,
+                                    end: manager.weeklyProgressPercent),
+                                duration: const Duration(seconds: 1),
+                                builder: (context, value, _) =>
+                                    CircularProgressIndicator(
+                                  value: value,
+                                  strokeWidth: 20,
+                                  backgroundColor: Colors.grey.shade200,
+                                  color: const Color(0xFF00897B),
+                                  strokeCap: StrokeCap.round,
+                                ),
+                              ),
+                            ),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _getWeeklyGoalLabel(
+                                      manager.weeklySessionsCompleted),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.grey[600],
+                                        letterSpacing: 1.2,
+                                      ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "${manager.weeklySessionsCompleted} / ${manager.weeklyGoal}",
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .displayLarge
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                    // ANIMATED STEP JOURNEY
+                    if (state == null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final double trackWidth = constraints.maxWidth;
+                            // Make sure stepGoal > 0 to avoid division by zero
+                            final double progressRaw = stepService.stepGoal > 0 ? (stepService.dailySteps / stepService.stepGoal) : 0;
+                            final double progress = progressRaw.clamp(0.0, 1.0);
+
+                            return TweenAnimationBuilder<double>(
+                              tween: Tween<double>(begin: 0, end: progress),
+                              duration: const Duration(seconds: 1),
+                              curve: Curves.easeOut,
+                              builder: (context, value, child) {
+                                // The icon is 32px wide, dynamically centered in a 100px container.
+                                // Local left of icon: 34px. Local right: 66px.
+                                final double containerWidth = 100.0;
+                                final double startLeft = -34.0; 
+                                final double endLeft = trackWidth - 66.0;
+                                final double leftPos = startLeft + ((endLeft - startLeft) * value);
+
+                                return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      height: 65,
+                                      width: double.infinity, // Forces the Stack with only Positioned children to expand to LayoutBuilder boundaries!
+                                      child: Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          // 1. The Pinned Goal Text (Right, below track line)
+                                          Positioned(
+                                            bottom: 0,
+                                            right: 0,
+                                            child: Text(
+                                              '10,000',
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                          // 2. The Track Line (Below icon, above texts)
+                                          Positioned(
+                                            bottom: 24, // 24px from bottom, fits text underneath
+                                            left: 0,
+                                            right: 0,
+                                            child: Container(
+                                              height: 4,
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFE0E0E0),
+                                                borderRadius: BorderRadius.circular(2),
+                                              ),
+                                            ),
+                                          ),
+                                          // 3. The Traveling Athlete and Current Steps
+                                          Positioned(
+                                            left: leftPos,
+                                            bottom: 0,
+                                            width: containerWidth,
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                // Icon sitting on the line
+                                                const Icon(
+                                                  Icons.directions_walk,
+                                                  size: 32,
+                                                  color: Color(0xFF00897B),
+                                                ),
+                                                const SizedBox(height: 6), // Spans across the 4px track line
+                                                // Animated steps text below the line
+                                                // Fade out the traveling text as it reaches the goal to prevent overlapping the pinned 10,000
+                                                Opacity(
+                                                  opacity: value > 0.90 ? (1.0 - ((value - 0.90) * 10.0)).clamp(0.0, 1.0) : 1.0, 
+                                                  child: Text(
+                                                    '${stepService.dailySteps} Steps',
+                                                      textAlign: TextAlign.center,
+                                                      style: const TextStyle(
+                                                        fontSize: 12,
+                                                        color: Color(0xFF00897B),
+                                                        fontWeight: FontWeight.bold,
+                                                        letterSpacing: 0.5,
+                                                      ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (stepService.isMatchReady) ...[
+                                      const SizedBox(height: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF00897B),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Text(
+                                          "MATCH READY",
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 10,
+                                            letterSpacing: 1.1,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
                             );
                           },
-                    style: FilledButton.styleFrom(
-                      backgroundColor:
-                          state == null ? Colors.black : Colors.red,
+                        ),
+                      ),
+
+                    const SizedBox(height: 24), // Reduced from 32
+
+                    // BPM (Hide during Rest as it's shown above)
+                    if (state?.phase != WorkoutPhase.rest) ...[
+                      const SizedBox(height: 16),
+
+                      // Heart Rate Display
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // Current BPM Pulse
+                          Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    "HEART RATE",
+                                    style:
+                                        Theme.of(context).textTheme.labelLarge,
+                                  ),
+                                  if (manager.lastHeartRateTime != null &&
+                                      DateTime.now()
+                                              .difference(
+                                                  manager.lastHeartRateTime!)
+                                              .inSeconds <
+                                          5)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 8.0),
+                                      child: Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.green,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              HeartRatePulse(
+                                bpm: manager.currentBpm,
+                                targetBpm: profile.targetHeartRate,
+                                isBelowTarget: state?.isBelowTarget ?? false,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    // Session Stats (Time/Laps Left) - Only for Cardio
+                    if (state != null && !profile.isStrength) ...[
+                      const SizedBox(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          Column(
+                            children: [
+                              Text(
+                                "TIME LEFT",
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                              Text(
+                                _formatDuration(state.workoutTimeRemaining),
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ],
+                          ),
+                          if (state.totalIntervalsInBlock > 0)
+                            Column(
+                              children: [
+                                Text(
+                                  "LAPS LEFT",
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                                Text(
+                                  "${state.totalIntervalsInBlock - state.currentIntervalIndex + 1}",
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ],
+
+                    const SizedBox(height: 16), // Reduced from 24
+
+                    // Bike/Treadmill Stats - Only for Cardio
+                    if (state != null && !profile.isStrength) ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          Column(
+                            children: [
+                              Text(
+                                "SPEED",
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                              Text(
+                                profile.gear == GarageGear.treadmill
+                                    ? "${((manager.currentSpeedKmh ?? 0) * 0.621371).toStringAsFixed(1)} mph"
+                                    : "${manager.currentSpeedMph.toStringAsFixed(1)} mph",
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ],
+                          ),
+                          Column(
+                            children: [
+                              Text(
+                                "DIST",
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                              Text(
+                                profile.gear == GarageGear.treadmill
+                                    ? "${(manager.treadmillHandler.cumulativeDistanceMiles).toStringAsFixed(2)} miles"
+                                    : "${manager.bikeDistanceMiles.toStringAsFixed(2)} miles",
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+
+                    // Equipment Selector
+                    const SizedBox(height: 16),
+
+                    // Equipment Status Pill (Triggers Modal)
+                    // SHOW ONLY IF SESSION SELECTED (manager.hasUserSelectedProfile)
+                    if (state == null && manager.hasUserSelectedProfile)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.only(
+                              bottom: 16.0), // Reduced from 24
+                          child: InkWell(
+                            onTap: () {
+                              showModalBottomSheet(
+                                context: context,
+                                backgroundColor: Colors.white,
+                                shape: const RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.vertical(
+                                    top: Radius.circular(20),
+                                  ),
+                                ),
+                                builder: (context) => SafeArea(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                            24, 24, 24, 0),
+                                        child: Text(
+                                          "SELECT EQUIPMENT",
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.black87,
+                                              ),
+                                        ),
+                                      ),
+                                      EquipmentSelector(
+                                        selectedGear: manager.activeEquipment,
+                                        onEquipmentSelected: (gear) {
+                                          manager.setActiveEquipment(gear);
+                                          Navigator.pop(context);
+                                        },
+                                        showLabel: false,
+                                      ),
+                                      const SizedBox(height: 24),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                    color: Colors.grey.shade300, width: 1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _getIconForGear(manager.activeEquipment),
+                                    size: 18,
+                                    color: Colors.black87,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _getNameForGear(manager.activeEquipment)
+                                        .toUpperCase(),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    // Controls
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: FilledButton(
+                        onPressed: state == null
+                            ? () {
+                                // Dynamic Action:
+                                // If NO selection -> Go to Select Session Screen
+                                // If HAS selection -> Start Workout
+
+                                if (!manager.hasUserSelectedProfile) {
+                                  widget.onRequestWorkoutSelection?.call();
+                                } else {
+                                  manager.startWorkout();
+                                }
+                              }
+                            : () {
+                                showDialog(
+                                  context: context,
+                                  builder: (dialogContext) => AlertDialog(
+                                    title: const Text("End Workout?"),
+                                    content: const Text(
+                                      "Do you want to save this session to your history?",
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext),
+                                        child: const Text("CANCEL"),
+                                      ),
+                                      TextButton(
+                                        onPressed: () {
+                                          manager.stopWorkout(save: false);
+                                          Navigator.pop(dialogContext);
+                                        },
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: Colors.red,
+                                        ),
+                                        child: const Text("DISCARD"),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () async {
+                                          // 1. Close Dialog
+                                          Navigator.pop(dialogContext);
+
+                                          // 2. Stop & Save
+                                          final session =
+                                              await manager.stopWorkout(
+                                            save: true,
+                                          );
+
+                                          // 3. Navigate is handled by the stream listener 'onSessionComplete'
+                                          if (session != null) {
+                                            // Just close dialog, the listener will handle the rest
+                                          }
+                                        },
+                                        child: const Text("SAVE & END"),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor:
+                              state == null ? Colors.black : Colors.red,
+                        ),
+                        child: Text(state == null
+                            ? (manager.hasUserSelectedProfile
+                                ? "START WORKOUT"
+                                : "SELECT SESSION")
+                            : "STOP"),
+                      ),
                     ),
-                    child: Text(state == null
-                        ? (manager.hasUserSelectedProfile
-                            ? "START WORKOUT"
-                            : "SELECT SESSION")
-                        : "STOP"),
-                  ),
+                  ],
                 ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.topCenter,
+            child: ConfettiWidget(
+              confettiController: _confettiController,
+              blastDirectionality: BlastDirectionality.explosive,
+              shouldLoop: false,
+              colors: const [
+                Colors.green,
+                Colors.blue,
+                Colors.pink,
+                Colors.orange,
+                Colors.purple
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }

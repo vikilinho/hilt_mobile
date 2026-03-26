@@ -558,7 +558,7 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
         return ListTile(
           leading: Icon(
             profile.isStrength ? Icons.fitness_center : Icons.sports_soccer,
-            color: profile.isStrength ? Colors.blue : Colors.green,
+            color: profile.isStrength ? const Color(0xFF00897B) : Colors.green,
           ),
           title: Text(profile.displayName),
           subtitle: Text(profile.isStrength

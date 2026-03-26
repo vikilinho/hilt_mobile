@@ -193,18 +193,39 @@ class WorkoutManager extends ChangeNotifier {
     }
 
     // 4. Audio Feedback & Rest Timer
+    final restTime = _lastState?.totalRestInBlock ??
+        (_currentProfile.restDuration > 0 ? _currentProfile.restDuration : 60);
+
     if (_currentProfile.gear == GarageGear.barbell) {
-      _tts.speak("Good set. 90 seconds rest starts now. Stay hydrated.");
+      _tts.speak("Good set. $restTime seconds rest starts now. Stay hydrated.");
     } else if (_currentProfile.gear == GarageGear.dumbbells) {
       _tts.speak(
-          "Good set. 60 seconds rest. Dumbbell ${_lastState?.blockLabel ?? 'next set'} starts soon. Focus on form and speed!");
+          "Good set. $restTime seconds rest. Dumbbell ${_lastState?.blockLabel ?? 'next set'} starts soon. Focus on form and speed!");
     } else {
       _tts.speak(
-          "Set logged. Rest for 60 seconds. Stay focused on your heart rate target.");
+          "Set logged. Rest for $restTime seconds. Stay focused on your heart rate target.");
     }
 
-    // 5. Advance Engine (Transition to Rest Phase which is set to 60s)
-    _engine?.completeCurrentSet();
+    // 5. Check if it's the final set in the block
+    bool hasMoreExercises = _workoutQueue.isNotEmpty &&
+        _currentQueueIndex < _workoutQueue.length - 1;
+
+    if (_lastState != null &&
+        _lastState!.totalIntervalsInBlock > 0 &&
+        _currentSetInBlock >= _lastState!.totalIntervalsInBlock &&
+        !hasMoreExercises) {
+      // It's the absolute final set of the entire workout session (no more combos queued).
+      // Programmatically end it now to match user preference: end on the last rep.
+      _tts.speak("Workout complete. Well done.");
+
+      // Stop the engine and save the session
+      print("[Mobile] Final set logged. Stopping workout.");
+      stopWorkout(save: true);
+    } else {
+      // Advance Engine (Transition to Rest Phase).
+      // If there are more combo exercises, the final rest will play naturally.
+      _engine?.completeCurrentSet();
+    }
 
     notifyListeners();
   }
@@ -299,25 +320,40 @@ class WorkoutManager extends ChangeNotifier {
 
     // 2. Stop Engine
     _engine?.stop();
-
     WakelockPlus.disable();
-    _engine = null;
-    _lastState = null;
 
     _endingBpm = _currentBpm;
-    _hasUserSelectedProfile = false; // Reset selection to return to Hub
     _workoutQueue.clear();
     _currentQueueIndex = 0;
 
+    WorkoutSession? session;
+
     if (save) {
-      final session = await _saveSession();
+      session = await _saveSession();
       if (session != null) {
         _sessionCompleteController.add(session);
       }
-      return session;
     }
-    notifyListeners();
-    return null;
+
+    // Now clear the UI state (this prevents the Dashboard from abruptly
+    // replacing the Workout UI while the save operation was running).
+    // Note: We use a brief delay to allow the PostWorkoutSummaryScreen transition
+    // to complete, avoiding a flash of the Dashboard's idle state.
+    if (save) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _engine = null;
+        _lastState = null;
+        _hasUserSelectedProfile = false; // Reset selection to return to Hub
+        notifyListeners();
+      });
+    } else {
+      _engine = null;
+      _lastState = null;
+      _hasUserSelectedProfile = false;
+      notifyListeners();
+    }
+
+    return session;
   }
 
   Future<WorkoutSession?> _saveSession() async {
@@ -786,10 +822,12 @@ class WorkoutManager extends ChangeNotifier {
     _loadSavedEquipment();
   }
 
+  SessionRepository? get repo => _repo;
+
   Future<void> _initDb() async {
     final dir = await getApplicationDocumentsDirectory();
     final isar = await Isar.open(
-      [WorkoutSessionSchema],
+      [WorkoutSessionSchema, UserStatsSchema],
       directory: dir.path,
     );
     _repo = SessionRepository(isar);

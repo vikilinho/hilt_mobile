@@ -20,9 +20,12 @@ class HistoryItemCard extends StatelessWidget {
     final theme = Theme.of(context);
     final gradeColor = _getGradeColor(session.grade);
     final isStrength = _isStrengthSession(session);
-    final categoryColor = isStrength
-        ? Colors.blue
-        : const Color(0xFF00E676); // Electric Blue or Neon Green
+    final isSteps = _isStepSession(session);
+    final categoryColor = isSteps 
+        ? const Color(0xFF00897B) // Hilt Teal for steps
+        : isStrength
+            ? Colors.blue
+            : const Color(0xFF00E676); // Electric Blue or Neon Green
 
     return Dismissible(
       key: ValueKey(session.id),
@@ -119,21 +122,21 @@ class HistoryItemCard extends StatelessWidget {
 
                             // Data Stats
                             Expanded(
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment
-                                    .spaceAround, // Distribute evenly
-                                children: [
-                                  _buildStat(context, "AVG BPM",
-                                      _sanitizeBpm(session.averageBpm)),
-                                  _buildStat(context, "PEAK",
-                                      "${_sanitizeInt(session.peakBpm)}"),
-                                  _buildStat(
-                                      context,
-                                      "IN ZONE",
-                                      _formatDuration(
-                                          session.timeInTargetZone)),
-                                ],
-                              ),
+                              child: isSteps
+                                  ? Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                      children: [
+                                        _buildStat(context, "TOTAL STEPS", "${session.steps ?? 0}"),
+                                      ],
+                                    )
+                                  : Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                      children: [
+                                        _buildStat(context, "AVG BPM", _sanitizeBpm(session.averageBpm)),
+                                        _buildStat(context, "PEAK", "${_sanitizeInt(session.peakBpm)}"),
+                                        _buildStat(context, "IN ZONE", _formatDuration(session.timeInTargetZone)),
+                                      ],
+                                    ),
                             ),
                           ],
                         ),
@@ -193,7 +196,13 @@ class HistoryItemCard extends StatelessWidget {
     return false;
   }
 
+  bool _isStepSession(WorkoutSession session) {
+    return session.comboNames?.contains('Daily Steps') ?? false;
+  }
+
   String _deriveSessionLabel(WorkoutSession session) {
+    if (_isStepSession(session)) return "DAILY STEPS";
+    
     // 1. If we have a Strength Score, it was a Strength Session
     if (_isStrengthSession(session)) {
       return "STRENGTH";
