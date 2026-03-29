@@ -314,8 +314,11 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                           if (widget.isFromHistory) {
                             Navigator.of(context).pop();
                           } else {
-                            Navigator.of(context)
-                                .popUntil((route) => route.isFirst);
+                            await context.read<WorkoutManager>().saveSessionToDatabase(widget.session);
+                            if (context.mounted) {
+                              Navigator.of(context)
+                                  .popUntil((route) => route.isFirst);
+                            }
                           }
                         }
                       },
@@ -553,8 +556,10 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                   final newDistKm = newDistMiles / 0.621371;
                   setState(() {
                     widget.session.distance = newDistKm;
-                    context.read<WorkoutManager>().updateSessionStats(
-                        widget.session.id, newDistKm, widget.session.incline);
+                    if (widget.isFromHistory) {
+                      context.read<WorkoutManager>().updateSessionStats(
+                          widget.session.id, newDistKm, widget.session.incline);
+                    }
                   });
                 }
                 Navigator.pop(context);

@@ -175,8 +175,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         height:
                             56), // Increased spacing for visual breathing room
 
-                    // Bike Integration (Only if Bike is selected)
-                    if (state == null && profile.gear == GarageGear.bike)
+                    // Bike Integration (Only if Bike is selected and user is in the preparation screen)
+                    if (state == null && manager.hasUserSelectedProfile && profile.gear == GarageGear.bike)
                       StreamBuilder(
                         stream: manager.bikeService.statusStream,
                         initialData: manager.bikeService.status,
@@ -290,36 +290,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (profile.gear == GarageGear.treadmill &&
-                                  state.phase != WorkoutPhase.rest) ...[
-                                // TREADMILL WORK PHASE: Show TARGET BPM
-                                Text(
-                                  "TARGET BPM",
-                                  style:
-                                      Theme.of(context).textTheme.headlineSmall,
+                              Text(
+                                "${profile.targetHeartRate}",
+                                style: const TextStyle(
+                                  fontSize: 96,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                  height: 1.0, 
                                 ),
-                                Text(
-                                  "${profile.targetHeartRate}",
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .displayLarge
-                                      ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                "BPM",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.grey[600],
+                                  letterSpacing: 2.5,
                                 ),
-                              ] else ...[
-                                // REST / OTHER / NON-TREADMILL: Show Timer
-                                Text(
-                                  state.phase.name.toUpperCase(),
-                                  style:
-                                      Theme.of(context).textTheme.headlineSmall,
-                                ),
-                                Text(
-                                  "${state.timeRemaining}",
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .displayLarge
-                                      ?.copyWith(fontWeight: FontWeight.bold),
-                                ),
-                              ]
+                              ),
                             ],
                           ),
                         ],
@@ -328,7 +316,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     // Weekly Goal Hub (Idle State)
                     // If Treadmill layout is active (check manager state/profile)
                     // Using profile.gear check since we are in idle state
-                    if (profile.gear == GarageGear.treadmill &&
+                    // If Cardio layout is active
+                    if (!profile.isStrength &&
                         manager.hasUserSelectedProfile)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 32.0),
@@ -351,26 +340,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Text(
-                                    "TARGET BPM", // Label
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.grey[600],
-                                          letterSpacing: 1.2,
-                                        ),
+                                    "${profile.targetHeartRate}", // Value
+                                    style: const TextStyle(
+                                      fontSize: 96,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                      height: 1.0,
+                                    ),
                                   ),
                                   Text(
-                                    "${profile.targetHeartRate}", // Value
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .displayLarge
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
-                                          fontSize: 64,
-                                        ),
+                                    "BPM",
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.grey[600],
+                                      letterSpacing: 2.5,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -437,125 +422,137 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       
                     // ANIMATED STEP JOURNEY
+                    // Uses StreamBuilder<int> so only this subtree rebuilds on
+                    // each step event — the rest of the screen is untouched.
                     if (state == null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final double trackWidth = constraints.maxWidth;
-                            // Make sure stepGoal > 0 to avoid division by zero
-                            final double progressRaw = stepService.stepGoal > 0 ? (stepService.dailySteps / stepService.stepGoal) : 0;
-                            final double progress = progressRaw.clamp(0.0, 1.0);
+                      StreamBuilder<int>(
+                        stream: stepService.stepsStream,
+                        initialData: stepService.dailySteps,
+                        builder: (context, snapshot) {
+                          final int liveSteps = snapshot.data ?? stepService.dailySteps;
+                          final int goal = stepService.stepGoal;
+                          final bool matchReady = liveSteps >= goal;
 
-                            return TweenAnimationBuilder<double>(
-                              tween: Tween<double>(begin: 0, end: progress),
-                              duration: const Duration(seconds: 1),
-                              curve: Curves.easeOut,
-                              builder: (context, value, child) {
-                                // The icon is 32px wide, dynamically centered in a 100px container.
-                                // Local left of icon: 34px. Local right: 66px.
-                                final double containerWidth = 100.0;
-                                final double startLeft = -34.0; 
-                                final double endLeft = trackWidth - 66.0;
-                                final double leftPos = startLeft + ((endLeft - startLeft) * value);
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final double trackWidth = constraints.maxWidth;
+                                final double progressRaw = goal > 0 ? (liveSteps / goal) : 0;
+                                final double progress = progressRaw.clamp(0.0, 1.0);
 
-                                return Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox(
-                                      height: 65,
-                                      width: double.infinity, // Forces the Stack with only Positioned children to expand to LayoutBuilder boundaries!
-                                      child: Stack(
-                                        clipBehavior: Clip.none,
-                                        children: [
-                                          // 1. The Pinned Goal Text (Right, below track line)
-                                          Positioned(
-                                            bottom: 0,
-                                            right: 0,
-                                            child: Text(
-                                              '10,000',
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.grey,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                          // 2. The Track Line (Below icon, above texts)
-                                          Positioned(
-                                            bottom: 24, // 24px from bottom, fits text underneath
-                                            left: 0,
-                                            right: 0,
-                                            child: Container(
-                                              height: 4,
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFFE0E0E0),
-                                                borderRadius: BorderRadius.circular(2),
-                                              ),
-                                            ),
-                                          ),
-                                          // 3. The Traveling Athlete and Current Steps
-                                          Positioned(
-                                            left: leftPos,
-                                            bottom: 0,
-                                            width: containerWidth,
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                // Icon sitting on the line
-                                                const Icon(
-                                                  Icons.directions_walk,
-                                                  size: 32,
-                                                  color: Color(0xFF00897B),
-                                                ),
-                                                const SizedBox(height: 6), // Spans across the 4px track line
-                                                // Animated steps text below the line
-                                                // Fade out the traveling text as it reaches the goal to prevent overlapping the pinned 10,000
-                                                Opacity(
-                                                  opacity: value > 0.90 ? (1.0 - ((value - 0.90) * 10.0)).clamp(0.0, 1.0) : 1.0, 
-                                                  child: Text(
-                                                    '${stepService.dailySteps} Steps',
-                                                      textAlign: TextAlign.center,
-                                                      style: const TextStyle(
-                                                        fontSize: 12,
-                                                        color: Color(0xFF00897B),
-                                                        fontWeight: FontWeight.bold,
-                                                        letterSpacing: 0.5,
-                                                      ),
+                                return TweenAnimationBuilder<double>(
+                                  tween: Tween<double>(begin: 0, end: progress),
+                                  // 300ms so the icon glides forward the moment a step is detected
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeOut,
+                                  builder: (context, value, child) {
+                                    // The icon is 32px wide, dynamically centered in a 100px container.
+                                    // Local left of icon: 34px. Local right: 66px.
+                                    const double containerWidth = 100.0;
+                                    const double startLeft = -34.0;
+                                    final double endLeft = trackWidth - 66.0;
+                                    final double leftPos = startLeft + ((endLeft - startLeft) * value);
+
+                                    return Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        SizedBox(
+                                          height: 65,
+                                          width: double.infinity,
+                                          child: Stack(
+                                            clipBehavior: Clip.none,
+                                            children: [
+                                              // 1. The Pinned Goal Text (Right, below track line)
+                                              Positioned(
+                                                bottom: 0,
+                                                right: 0,
+                                                child: Text(
+                                                  '${goal >= 1000 ? '${(goal / 1000).toStringAsFixed(0)}K' : goal}',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey,
+                                                    fontWeight: FontWeight.bold,
                                                   ),
                                                 ),
-                                              ],
+                                              ),
+                                              // 2. The Track Line (Below icon, above texts)
+                                              Positioned(
+                                                bottom: 24,
+                                                left: 0,
+                                                right: 0,
+                                                child: Container(
+                                                  height: 4,
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(0xFFE0E0E0),
+                                                    borderRadius: BorderRadius.circular(2),
+                                                  ),
+                                                ),
+                                              ),
+                                              // 3. The Traveling Athlete and Current Steps
+                                              Positioned(
+                                                left: leftPos,
+                                                bottom: 0,
+                                                width: containerWidth,
+                                                child: Column(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(
+                                                      Icons.directions_walk,
+                                                      size: 32,
+                                                      color: Color(0xFF00897B),
+                                                    ),
+                                                    const SizedBox(height: 6),
+                                                    // Fade out traveling text near the goal to avoid overlapping the pinned label
+                                                    Opacity(
+                                                      opacity: value > 0.90
+                                                          ? (1.0 - ((value - 0.90) * 10.0)).clamp(0.0, 1.0)
+                                                          : 1.0,
+                                                      child: Text(
+                                                        '$liveSteps Steps',
+                                                        textAlign: TextAlign.center,
+                                                        style: const TextStyle(
+                                                          fontSize: 12,
+                                                          color: Color(0xFF00897B),
+                                                          fontWeight: FontWeight.bold,
+                                                          letterSpacing: 0.5,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (matchReady) ...[
+                                          const SizedBox(height: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF00897B),
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: const Text(
+                                              "MATCH READY",
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 10,
+                                                letterSpacing: 1.1,
+                                              ),
                                             ),
                                           ),
                                         ],
-                                      ),
-                                    ),
-                                    if (stepService.isMatchReady) ...[
-                                      const SizedBox(height: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF00897B),
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: const Text(
-                                          "MATCH READY",
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 10,
-                                            letterSpacing: 1.1,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ],
+                                      ],
+                                    );
+                                  },
                                 );
                               },
-                            );
-                          },
-                        ),
+                            ),
+                          );
+                        },
                       ),
 
                     const SizedBox(height: 24), // Reduced from 32

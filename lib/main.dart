@@ -51,6 +51,23 @@ void callbackDispatcher() {
             (now.day != lastReset.day || 
              now.month != lastReset.month || 
              now.year != lastReset.year)) {
+          
+          // Archive the previous day's steps before resetting
+          if (stats.dailySteps > 0) {
+            final session = WorkoutSession()
+              ..timestamp = DateTime(lastReset.year, lastReset.month, lastReset.day, 23, 59)
+              ..sportType = SportType.custom
+              ..steps = stats.dailySteps
+              ..heartRateReadings = []
+              ..averageBpm = 0
+              ..peakBpm = 0
+              ..timeInTargetZone = 0
+              ..grade = '-'
+              ..durationSeconds = 0
+              ..comboNames = ['Daily Steps'];
+            await repo.saveSession(session);
+          }
+
           stats.dailySteps = delta;
           stats.lastResetDate = now;
         } else {
@@ -97,7 +114,7 @@ class HiltMobileApp extends StatelessWidget {
         ChangeNotifierProxyProvider<WorkoutManager, StepService>(
           create: (_) => StepService(),
           update: (_, manager, stepService) {
-            stepService!.updateRepo(manager.repo);
+            stepService!.updateDependencies(manager);
             return stepService;
           },
         ),
