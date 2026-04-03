@@ -1,49 +1,49 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'dart:collection';
+import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pedometer/pedometer.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import '../workout_manager.dart';
 
-/// Step-tracking service using the industry-standard **Daily Offset** pattern.
-///
-/// `TYPE_STEP_COUNTER` emits a monotonically-increasing total since the last
-/// device reboot. On the **first sensor event of each calendar day** we store
-/// that raw value as [UserStats.startOfDaySteps] (the "anchor"). Every
-/// subsequent event within the same day computes:
-///
-///   displaySteps = rawSensorTotal − startOfDaySteps
-///
-/// This is exactly how Google Fit and Fitbit calibrate their step counts and
-/// naturally survives reboots, midnight-crossings, and foreground/background
-/// transitions without any drift.
-///
-/// Battery: the `pedometer` package wraps Android's `TYPE_STEP_COUNTER` which
-/// is handled entirely in the low-power hardware step chip — no wakelock is
-/// required and CPU usage is negligible.
+class MagEvent {
+  final DateTime time;
+  final double mag;
+  MagEvent(this.time, this.mag);
+}
+
 class StepService extends ChangeNotifier with WidgetsBindingObserver {
   SessionRepository? _repo;
   UserStats? _userStats;
   StreamSubscription<StepCount>? _stepSubscription;
+  StreamSubscription<AccelerometerEvent>? _accelSubscription;
   Timer? _midnightCheckTimer;
 
-  // Internal broadcast stream so widgets can subscribe without rebuilding
-  // the entire screen on every step event.
   final _stepsController = StreamController<int>.broadcast();
-
-  /// Live stream of today's display step count.
-  /// Widgets should prefer `StreamBuilder<int>(stream: stepService.stepsStream)`
-  /// over `context.watch<StepService>()` to limit rebuild scope.
   Stream<int> get stepsStream => _stepsController.stream;
 
   int _currentSteps = 0;
-
   int get dailySteps => _currentSteps;
   int get stepGoal => _userStats?.stepGoal ?? 10000;
   bool get isMatchReady => dailySteps >= stepGoal;
 
   WorkoutManager? _workoutManager;
+  int _lastRawSensorTotal = 0;
+
+  // ---------------------------------------------------------------------------
+  // Gait Validation State
+  // ---------------------------------------------------------------------------
+  final Queue<MagEvent> _recentMagnitudes = Queue();
+  final Queue<DateTime> _recentPeaks = Queue();
+  DateTime? _shakePauseUntil;
+  double _lastMag = 1.0;
+  double _lastLastMag = 1.0;
+
+  final Queue<DateTime> _stepBuffer = Queue();
+  DateTime _lastValidStepTime = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _isWalkingBurst = false;
 
   StepService() {
     _startMidnightChecker();
@@ -58,25 +58,15 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // App lifecycle
-  // ---------------------------------------------------------------------------
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Re-read Isar so we have the latest persisted values. The sensor stream
-      // will fire a fresh event within milliseconds and self-correct via
-      // _handleNewSensorValue, so there is no need to do anything heavier here.
+      _startAccelerometerStream();
       _refreshFromIsar();
       _checkMidnightReset();
       _workoutManager?.refreshHistory();
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Initialisation
-  // ---------------------------------------------------------------------------
 
   Future<void> _initService() async {
     if (_repo == null) return;
@@ -85,42 +75,114 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       await Permission.activityRecognition.request();
     }
 
+    _startAccelerometerStream();
     await _refreshFromIsar();
     _checkMidnightReset();
 
-    // Subscribe to the hardware step-chip stream. Each event carries the
-    // cumulative total since the last device reboot.
-    _stepSubscription =
-        Pedometer.stepCountStream.listen((StepCount event) {
+    _stepSubscription = Pedometer.stepCountStream.listen((StepCount event) {
       _handleNewSensorValue(event.steps);
     }, onError: (error) {
       debugPrint('[StepService] Sensor error: $error');
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // ACCELEROMETER STREAM (GAIT VALIDATOR)
+  // ---------------------------------------------------------------------------
+  void _startAccelerometerStream() {
+    _accelSubscription?.cancel();
+    _accelSubscription = accelerometerEventStream().listen((event) {
+      final now = DateTime.now();
+      final mag = math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z) / 9.81;
+
+      _recentMagnitudes.add(MagEvent(now, mag));
+
+      // Peak Detection
+      if (_lastMag > _lastLastMag && _lastMag > mag && _lastMag > 1.1) {
+        _recentPeaks.add(now);
+      }
+
+      _lastLastMag = _lastMag;
+      _lastMag = mag;
+
+      // Sliding windows pruning
+      final magCutoff = now.subtract(const Duration(milliseconds: 1500));
+      while (_recentMagnitudes.isNotEmpty && _recentMagnitudes.first.time.isBefore(magCutoff)) {
+        _recentMagnitudes.removeFirst();
+      }
+
+      final peakCutoff = now.subtract(const Duration(seconds: 1));
+      while (_recentPeaks.isNotEmpty && _recentPeaks.first.isBefore(peakCutoff)) {
+        _recentPeaks.removeFirst();
+      }
+
+      // 4Hz Frequency Cutoff Loop Protector
+      if (_recentPeaks.length > 4) {
+        _shakePauseUntil = now.add(const Duration(seconds: 5));
+      }
+    }, onError: (e) {
+      debugPrint('[StepService] Accel error: $e');
+    });
+  }
+
+  bool _validateWithAccelerometer() {
+    final now = DateTime.now();
+
+    // 1. Is 5-second shake pause active?
+    if (_shakePauseUntil != null && now.isBefore(_shakePauseUntil!)) {
+      return false;
+    }
+
+    // If accelerometer data is unavailable, default to trusting the pedometer.
+    if (_recentMagnitudes.isEmpty) return true;
+
+    // 2. Magnitude Ceiling Filter
+    double maxMag = 1.0;
+    for (var m in _recentMagnitudes) {
+      if (m.mag > maxMag) maxMag = m.mag;
+    }
+
+    // Walking while holding the phone steady (foreground) has very low G-force variance
+    // so we removed the 1.1G minimum floor. We only filter out violent shakes (> 3.0G).
+    if (maxMag > 3.0) {
+      return false; // Noise (filtered out)
+    }
+    return true; // Kinematically valid step
+  }
+
+  void _commitBufferedSteps() {
+    if (_stepBuffer.isNotEmpty) {
+      _userStats!.startOfDaySteps -= _stepBuffer.length;
+      _stepBuffer.clear();
+      _isWalkingBurst = true;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // STEP PROCESSING
+  // ---------------------------------------------------------------------------
   Future<void> _refreshFromIsar() async {
     if (_repo == null) return;
     _userStats = await _repo!.getUserStats();
+    
+    // 1. Immediately load the persisted state so the UI snaps to the correct steps in 0ms.
     final persisted = _userStats?.dailySteps ?? 0;
     if (persisted != _currentSteps) {
       _currentSteps = persisted;
       _publish();
     }
+
+    // 2. Initialize the background delta anchor mathematically without waiting for the sensor.
+    final anchor = _userStats?.startOfDaySteps ?? 0;
+    _lastRawSensorTotal = persisted + anchor;
   }
 
-  // ---------------------------------------------------------------------------
-  // Daily Offset calibration
-  // ---------------------------------------------------------------------------
-
-  /// Called on every sensor tick. [rawSensorTotal] is the device's cumulative
-  /// step count since the last reboot — it never resets mid-day on its own.
   Future<void> _handleNewSensorValue(int rawSensorTotal) async {
     if (_userStats == null || _repo == null) return;
 
     final now = DateTime.now();
     final lastReset = _userStats!.lastResetDate;
 
-    // --- 1. Midnight / new-day check ---
     if (lastReset != null) {
       final nowDay = DateTime(now.year, now.month, now.day);
       final lastDay = DateTime(lastReset.year, lastReset.month, lastReset.day);
@@ -128,6 +190,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       if (!nowDay.isAtSameMomentAs(lastDay)) {
         _userStats!.lastResetDate = now;
         await _handleDayChange(lastDay, nowDay, now, rawSensorTotal);
+        _lastRawSensorTotal = rawSensorTotal;
         return;
       }
     } else {
@@ -136,51 +199,100 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       _userStats!.lastResetDate = now;
       _userStats!.startOfDaySteps = rawSensorTotal;
       await _repo!.saveUserStats(_userStats!);
+      _lastRawSensorTotal = rawSensorTotal;
       _publish();
       return;
     }
 
-    // --- 2. Daily Offset: first sync of the day ---
-    // If startOfDaySteps is 0, we must initialise it carefully.
     if (_userStats!.startOfDaySteps == 0 && rawSensorTotal > 0) {
-      // If we loaded pre-existing steps (e.g. from history), the anchor MUST
-      // be lowered by exactly that amount so `displaySteps` mathematically resumes.
       int newAnchor = rawSensorTotal - _userStats!.dailySteps;
       if (newAnchor < 0) newAnchor = 0;
       _userStats!.startOfDaySteps = newAnchor;
       await _repo!.saveUserStats(_userStats!);
     }
+    
+    // --- GAIT VALIDATION LOGIC ---
+    int delta = rawSensorTotal - _lastRawSensorTotal;
+    _lastRawSensorTotal = rawSensorTotal;
 
-    // --- 3. Compute display steps via offset ---
+    if (delta <= 0) return;
+
+    bool dbNeedsUpdate = false;
+
+    if (delta > 5) {
+      // Bulk jump from deep sleep/background. Flush active buffers and commit.
+      _commitBufferedSteps();
+      dbNeedsUpdate = true;
+    } else {
+      for (int i = 0; i < delta; i++) {
+        bool isValid = _validateWithAccelerometer();
+        
+        if (!isValid) {
+          _userStats!.startOfDaySteps++; // Ghost offset: Permanently hide invalid step
+          _isWalkingBurst = false;
+          _stepBuffer.clear();
+          dbNeedsUpdate = true;
+          continue;
+        }
+
+        if (_isWalkingBurst) {
+          if (now.difference(_lastValidStepTime).inSeconds > 3) {
+            // Burst expired: Go back to buffering
+            _isWalkingBurst = false;
+            _stepBuffer.clear();
+            _stepBuffer.add(now);
+            _userStats!.startOfDaySteps++; // Buffer it
+            dbNeedsUpdate = true;
+          } else {
+            // Valid step in active burst. Allow UI increment bypass.
+          }
+        } else {
+          // Add to Buffer
+          _stepBuffer.add(now);
+          _userStats!.startOfDaySteps++; // Hide while buffering
+          dbNeedsUpdate = true;
+
+          final cutoff = now.subtract(const Duration(seconds: 12));
+          while (_stepBuffer.isNotEmpty && _stepBuffer.first.isBefore(cutoff)) {
+            _stepBuffer.removeFirst();
+          }
+
+          if (_stepBuffer.length >= 8) {
+            // Burst Achieved: Graduate 8 steps!
+            _isWalkingBurst = true;
+            _userStats!.startOfDaySteps -= _stepBuffer.length;
+            _stepBuffer.clear();
+          }
+        }
+        _lastValidStepTime = now;
+      }
+    }
+
     final offset = _userStats!.startOfDaySteps;
     int displaySteps = rawSensorTotal - offset;
 
-    // Handle edge case: sensor reset (e.g., reboot mid-day) where rawSensorTotal
-    // drops below the stored offset. Treat post-reboot raw value as new delta.
     if (displaySteps < 0) {
       _userStats!.startOfDaySteps = rawSensorTotal;
       displaySteps = 0;
-      await _repo!.saveUserStats(_userStats!);
+      dbNeedsUpdate = true;
     }
 
     if (displaySteps != _currentSteps) {
       _currentSteps = displaySteps;
-      await _saveCurrentSteps();
+      _userStats!.dailySteps = _currentSteps;
+      _userStats!.lastResetDate = now;
+      dbNeedsUpdate = true;
+      _publish();
+    }
+
+    if (dbNeedsUpdate) {
+      await _repo!.saveUserStats(_userStats!);
     }
   }
 
-  Future<void> _saveCurrentSteps() async {
-    if (_userStats == null || _repo == null) return;
-    _userStats!.dailySteps = _currentSteps;
-    _userStats!.lastResetDate = DateTime.now();
-    await _repo!.saveUserStats(_userStats!);
-    _publish();
-  }
-
   // ---------------------------------------------------------------------------
-  // Midnight reset & archiving
+  // MIDNIGHT RESET & ARCHIVE 
   // ---------------------------------------------------------------------------
-
   void _startMidnightChecker() {
     _midnightCheckTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _checkMidnightReset();
@@ -197,8 +309,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       final lastDay = DateTime(lastReset.year, lastReset.month, lastReset.day);
 
       if (!nowDay.isAtSameMomentAs(lastDay)) {
-        // Guard against double entry from timer
-        _userStats!.lastResetDate = now; 
+        _userStats!.lastResetDate = now;
         _handleDayChange(lastDay, nowDay, now, null);
       }
     } else if (lastReset == null) {
@@ -207,11 +318,18 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _saveCurrentSteps() async {
+    if (_userStats == null || _repo == null) return;
+    _userStats!.dailySteps = _currentSteps;
+    _userStats!.lastResetDate = DateTime.now();
+    await _repo!.saveUserStats(_userStats!);
+    _publish();
+  }
+
   Future<void> _handleDayChange(
       DateTime lastDay, DateTime nowDay, DateTime now, int? rawSensorTotal) async {
     final archivedSteps = _currentSteps;
 
-    // 1. Archive the outgoing day's steps
     if (archivedSteps > 0) {
       final sessions = await _repo!.getAllSessions();
       final existingLastDay = sessions.where((s) {
@@ -245,7 +363,6 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       }
     }
 
-    // 2. Load the incoming day's steps (if any exist)
     final sessions = await _repo!.getAllSessions();
     final existingIncomingDay = sessions.where((s) {
       if (s.comboNames?.contains('Daily Steps') ?? false) {
@@ -257,7 +374,6 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
     if (existingIncomingDay != null) {
       _currentSteps = existingIncomingDay.steps ?? 0;
-      // Wipe the offset anchor so the next sensor tick recalibrates it dynamically
       _userStats!.startOfDaySteps = 0; 
       await _repo!.deleteSession(existingIncomingDay.id);
     } else {
@@ -265,17 +381,12 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       _userStats!.startOfDaySteps = rawSensorTotal ?? 0;
     }
 
-    // 3. Reset boundaries
     _userStats!.dailySteps = _currentSteps;
     _userStats!.lastResetDate = now;
     await _repo!.saveUserStats(_userStats!);
     _workoutManager?.refreshHistory();
     _publish();
   }
-
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
 
   void _publish() {
     if (!_stepsController.isClosed) {
@@ -288,6 +399,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stepSubscription?.cancel();
+    _accelSubscription?.cancel();
     _midnightCheckTimer?.cancel();
     _stepsController.close();
     super.dispose();

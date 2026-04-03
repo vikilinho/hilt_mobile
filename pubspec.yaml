@@ -1,7 +1,7 @@
 name: hilt_mobile
 description: Companion app for Hilt Watch.
 publish_to: 'none'
-version: 1.0.1+10
+version: 1.0.3+12
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -31,6 +31,7 @@ dependencies:
   workmanager: ^0.9.0+3
   pedometer: ^4.2.0
   health: ^13.3.1
+  sensors_plus: ^7.0.0
 
 dev_dependencies:
   flutter_test:

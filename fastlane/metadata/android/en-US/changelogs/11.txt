@@ -1,0 +1,18 @@
+### What's New in Version 1.0.2
+
+**Daily Step Tracking & Goals**
+- **Match Ready Tracker**: Your phone now tracks your daily steps directly on the Dashboard. Hit your daily goal to earn the "MATCH READY" badge.
+- Enhanced step counter accuracy and performance with seamless midnight resets and detailed history logs.
+
+**Live Football Scores**
+- **Faster, Accurate Match Data**: We've upgraded the Livescore engine to pull real-time football match data instantly, ensuring highly accurate scores and lightning-fast load times. 
+
+**Elite HUD Redesign & Quicker Workouts**
+- **Sleek Workout HUD**: The central progress ring has been completely redesigned with a split-zone layout, boldly displaying your Lap Timer on top and Target BPM on the bottom.
+- **Dynamic Laps**: The green tracking ring now corresponds exactly to your active lap or interval duration. 
+- **Faster Recovery**: Reduced maximum rest periods to **45 seconds** across all Barbell, Dumbbell, and Bench presets to keep your heart rate up and enforce an elite training pace.
+
+**Bug Fixes & Improvements**
+- Improved reliability for Google Sign-In authentication.
+- Fixed a bug causing the "Connect Bike" button to linger post-workout.
+- Improved iOS support and general UI performance optimizations.

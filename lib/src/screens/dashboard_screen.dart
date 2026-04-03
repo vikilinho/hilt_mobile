@@ -268,7 +268,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     if (state?.phase == WorkoutPhase.strengthWork)
                       _buildStrengthInput(context, manager)
                     else if (state != null)
-                      // Active Workout Timer
+                      // Active Workout HUD — Lap Timer + Target BPM
                       Stack(
                         alignment: Alignment.center,
                         children: [
@@ -282,32 +282,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       state.currentPhaseDuration,
                               strokeWidth: 20,
                               backgroundColor: Colors.grey.shade200,
-                              color: state.phase == WorkoutPhase.rest
-                                  ? Colors.blue
-                                  : Colors.green,
+                              color: const Color(0xFF43A047), // Always green — tracks lap
+                              strokeCap: StrokeCap.round,
                             ),
                           ),
                           Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              // TOP ZONE: Lap countdown timer
                               Text(
-                                "${profile.targetHeartRate}",
-                                style: const TextStyle(
-                                  fontSize: 96,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
-                                  height: 1.0, 
-                                ),
-                              ),
-                              Text(
-                                "BPM",
+                                "${state.timeRemaining}",
                                 style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.grey[600],
-                                  letterSpacing: 2.5,
+                                  fontSize: 42,
+                                  fontWeight: FontWeight.w400,
+                                  color: Colors.grey[700],
+                                  height: 1.0,
+                                  letterSpacing: 1.5,
                                 ),
                               ),
+                              const SizedBox(height: 6),
+                              // BOTTOM ZONE: Target BPM (hidden during rest)
+                              if (state.phase != WorkoutPhase.rest)
+                                Text(
+                                  "${state.targetBpm}",
+                                  style: const TextStyle(
+                                    fontSize: 60,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.black87,
+                                    height: 1.0,
+                                  ),
+                                ),
                             ],
                           ),
                         ],
@@ -331,33 +335,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color:
-                                      const Color(0xFF00897B).withOpacity(0.2),
+                                      const Color(0xFF43A047).withOpacity(0.2),
                                   width: 20,
                                 ),
                               ),
                               alignment: Alignment.center,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    "${profile.targetHeartRate}", // Value
-                                    style: const TextStyle(
-                                      fontSize: 96,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                      height: 1.0,
-                                    ),
-                                  ),
-                                  Text(
-                                    "BPM",
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.grey[600],
-                                      letterSpacing: 2.5,
-                                    ),
-                                  ),
-                                ],
+                              child: Text(
+                                "${profile.targetHeartRate}",
+                                style: const TextStyle(
+                                  fontSize: 60,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.black87,
+                                  height: 1.0,
+                                ),
                               ),
                             ),
                           ],
