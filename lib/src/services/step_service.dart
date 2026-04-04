@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/foundation.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import '../workout_manager.dart';
@@ -75,16 +76,68 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       await Permission.activityRecognition.request();
     }
 
-    _startAccelerometerStream();
+    _startSensorStreams();
     await _refreshFromIsar();
+  }
+
+  void _startSensorStreams() {
+    _stepSubscription?.cancel();
+    _accelSubscription?.cancel();
+
     _checkMidnightReset();
 
-    _stepSubscription = Pedometer.stepCountStream.listen((StepCount event) {
+    _stepSubscription = (_stepStreamOverride ?? Pedometer.stepCountStream).listen((StepCount event) {
       _handleNewSensorValue(event.steps);
     }, onError: (error) {
       debugPrint('[StepService] Sensor error: $error');
     });
+
+    _accelSubscription = (_accelStreamOverride ?? accelerometerEventStream()).listen((event) {
+        final now = DateTime.now();
+        final mag = math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z) / 9.81;
+
+        _recentMagnitudes.add(MagEvent(now, mag));
+
+        // Peak Detection
+        if (_lastMag > _lastLastMag && _lastMag > mag && _lastMag > 1.2) {
+          _recentPeaks.add(now);
+        }
+
+        _lastLastMag = _lastMag;
+        _lastMag = mag;
+
+        // Sliding windows pruning
+        final magCutoff = now.subtract(const Duration(milliseconds: 1500));
+        while (_recentMagnitudes.isNotEmpty && _recentMagnitudes.first.time.isBefore(magCutoff)) {
+          _recentMagnitudes.removeFirst();
+        }
+
+        final peakCutoff = now.subtract(const Duration(seconds: 1));
+        while (_recentPeaks.isNotEmpty && _recentPeaks.first.isBefore(peakCutoff)) {
+          _recentPeaks.removeFirst();
+        }
+
+        // 4Hz Frequency Cutoff Loop Protector
+        if (_recentPeaks.length > 4) {
+          _shakePauseUntil = now.add(const Duration(seconds: 5));
+        }
+    });
   }
+
+  Stream<StepCount>? _stepStreamOverride;
+  Stream<AccelerometerEvent>? _accelStreamOverride;
+
+  @visibleForTesting
+  void setStreamOverrides({
+    Stream<StepCount>? steps,
+    Stream<AccelerometerEvent>? accel,
+  }) {
+    _stepStreamOverride = steps;
+    _accelStreamOverride = accel;
+    _startSensorStreams();
+  }
+
+
 
   // ---------------------------------------------------------------------------
   // ACCELEROMETER STREAM (GAIT VALIDATOR)
@@ -98,7 +151,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       _recentMagnitudes.add(MagEvent(now, mag));
 
       // Peak Detection
-      if (_lastMag > _lastLastMag && _lastMag > mag && _lastMag > 1.1) {
+      if (_lastMag > _lastLastMag && _lastMag > mag && _lastMag > 1.2) {
         _recentPeaks.add(now);
       }
 
@@ -143,9 +196,9 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     // Walking while holding the phone steady (foreground) has very low G-force variance
-    // so we removed the 1.1G minimum floor. We only filter out violent shakes (> 3.0G).
-    if (maxMag > 3.0) {
-      return false; // Noise (filtered out)
+    // We only filter out violent shakes (> 2.5G).
+    if (maxMag > 2.5) {
+      return false; // Kinematically invalid step
     }
     return true; // Kinematically valid step
   }
@@ -277,7 +330,9 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       dbNeedsUpdate = true;
     }
 
+    int stepDelta = 0;
     if (displaySteps != _currentSteps) {
+      stepDelta = displaySteps - _currentSteps;
       _currentSteps = displaySteps;
       _userStats!.dailySteps = _currentSteps;
       _userStats!.lastResetDate = now;
@@ -287,6 +342,24 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
     if (dbNeedsUpdate) {
       await _repo!.saveUserStats(_userStats!);
+      if (stepDelta > 0 && _repo != null) {
+        final naturalId = int.parse("${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}");
+        final midnight = DateTime(now.year, now.month, now.day);
+        
+        await _repo!.isar.writeTxn(() async {
+           final existing = await _repo!.isar.dailyActivitys.get(naturalId);
+           final updatedSteps = (existing?.totalSteps ?? _currentSteps) + stepDelta;
+           
+           final activity = DailyActivity()
+              ..id = naturalId
+              ..date = midnight
+              ..totalSteps = updatedSteps
+              ..miles = double.parse((updatedSteps * 0.00047).toStringAsFixed(1))
+              ..calories = (updatedSteps * 0.04).toInt();
+              
+           await _repo!.isar.dailyActivitys.put(activity);
+        });
+      }
     }
   }
 

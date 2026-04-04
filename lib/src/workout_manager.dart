@@ -795,6 +795,17 @@ class WorkoutManager extends ChangeNotifier {
     }
   }
 
+  Future<void> updatePeakBpm(int sessionId, int bpm) async {
+    try {
+      final session = _history.firstWhere((s) => s.id == sessionId);
+      session.peakBpm = bpm;
+      await _repo?.saveSession(session);
+      await refreshHistory();
+    } catch (e) {
+      print("[Mobile] Error updating peak BPM: $e");
+    }
+  }
+
   // Public Getters
   int get currentBpm => _currentBpm;
   WorkoutState? get workoutState => _lastState;
@@ -834,7 +845,7 @@ class WorkoutManager extends ChangeNotifier {
   Future<void> _initDb() async {
     final dir = await getApplicationDocumentsDirectory();
     final isar = await Isar.open(
-      [WorkoutSessionSchema, UserStatsSchema],
+      [WorkoutSessionSchema, UserStatsSchema, DailyActivitySchema],
       directory: dir.path,
     );
     _repo = SessionRepository(isar);

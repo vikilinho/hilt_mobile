@@ -6,6 +6,7 @@ import 'src/screens/history_screen.dart';
 import 'src/screens/workout_selection_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'src/services/step_service.dart';
+import 'src/services/health_sync_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,13 @@ class HiltMobileApp extends StatelessWidget {
           update: (_, manager, stepService) {
             stepService!.updateDependencies(manager);
             return stepService;
+          },
+        ),
+        ProxyProvider2<WorkoutManager, StepService, HealthSyncService>(
+          create: (_) => HealthSyncService(_.read<StepService>()),
+          update: (_, manager, stepService, healthService) {
+             healthService?.updateDependencies(manager);
+             return healthService ?? HealthSyncService(stepService);
           },
         ),
       ],
@@ -50,8 +58,27 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      context.read<HealthSyncService>().fetchDailySteps();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

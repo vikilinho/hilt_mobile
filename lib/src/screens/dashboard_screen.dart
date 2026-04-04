@@ -412,16 +412,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       
                     // ANIMATED STEP JOURNEY
-                    // Uses StreamBuilder<int> so only this subtree rebuilds on
-                    // each step event — the rest of the screen is untouched.
                     if (state == null)
-                      StreamBuilder<int>(
-                        stream: stepService.stepsStream,
-                        initialData: stepService.dailySteps,
-                        builder: (context, snapshot) {
-                          final int liveSteps = snapshot.data ?? stepService.dailySteps;
-                          final int goal = stepService.stepGoal;
-                          final bool matchReady = liveSteps >= goal;
+                      Builder(
+                        builder: (context) {
+                          if (manager.repo == null) return const SizedBox.shrink();
+                          
+                          final now = DateTime.now();
+                          final naturalId = int.parse(
+                              "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}");
+                              
+                          return StreamBuilder<DailyActivity?>(
+                            stream: manager.repo!.isar.dailyActivitys.watchObject(naturalId, fireImmediately: true),
+                            builder: (context, snapshot) {
+                              final int liveSteps = snapshot.data?.totalSteps ?? stepService.dailySteps;
+                              final int goal = stepService.stepGoal;
 
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
@@ -515,26 +519,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             ],
                                           ),
                                         ),
-                                        if (matchReady) ...[
-                                          const SizedBox(height: 8),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 10, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF00897B),
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                            child: const Text(
-                                              "MATCH READY",
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 10,
-                                                letterSpacing: 1.1,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                        // Match Ready label removed by request
                                       ],
                                     );
                                   },
@@ -542,9 +527,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               },
                             ),
                           );
+                            },
+                          );
                         },
                       ),
-
                     const SizedBox(height: 24), // Reduced from 32
 
                     // BPM (Hide during Rest as it's shown above)
