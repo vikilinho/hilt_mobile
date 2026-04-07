@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Hilt King – Fastlane Matchfile
+# Manages iOS code signing via `match` (git-backed certificate/profile store).
+# ─────────────────────────────────────────────────────────────────────────────
+
+git_url(ENV["MATCH_GIT_URL"])           # Private git repo storing certs/profiles
+storage_mode("git")
+
+type("appstore")                        # Default match type
+
+app_identifier(["com.hiltking.hiltMobile"])
+username(ENV["APPLE_ID"])
+
+# Uncomment if you have separate teams:
+# team_id(ENV["APPLE_TEAM_ID"])

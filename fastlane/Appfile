@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Hilt King – Fastlane Appfile
+# Tells Fastlane the app identifiers and developer credentials so
+# individual actions don't need them repeated.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Android ───────────────────────────────────────────────────────────────────
+json_key_file(ENV["PLAY_STORE_JSON_KEY_PATH"])   # Google Service Account key
+package_name("com.hiltking.app")
+
+# ── iOS ───────────────────────────────────────────────────────────────────────
+app_identifier("com.hiltking.hiltMobile")        # iOS Bundle ID
+apple_id(ENV["APPLE_ID"])                        # e.g. you@example.com
+itc_team_id(ENV["ITC_TEAM_ID"])                  # App Store Connect team ID
+team_id(ENV["APPLE_TEAM_ID"])                    # Apple Developer team ID

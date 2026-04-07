@@ -1,0 +1,163 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Hilt King – Android Fastfile
+# Location: hilt_mobile/fastlane/Fastfile  (shared for both platforms)
+#
+# Lanes:
+#   bundle exec fastlane android deploy_play_store   → AAB → Play Store (internal)
+#   bundle exec fastlane ios    deploy_testflight    → IPA → TestFlight
+# ─────────────────────────────────────────────────────────────────────────────
+
+default_platform(:android)
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
+
+# Root of the Flutter project (one level up from fastlane/)
+FLUTTER_ROOT = File.expand_path("../../", __dir__)
+
+# Paths
+PUBSPEC      = File.join(FLUTTER_ROOT, "pubspec.yaml")
+ANDROID_ROOT = File.join(FLUTTER_ROOT, "android")
+IOS_ROOT     = File.join(FLUTTER_ROOT, "ios")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANDROID PLATFORM
+# ─────────────────────────────────────────────────────────────────────────────
+platform :android do
+
+  # ── deploy_play_store ───────────────────────────────────────────────────────
+  desc "Build a release AAB and upload to Play Store internal track"
+  lane :deploy_play_store do
+
+    # 1. Bump version from the latest Git tag (no-op if tag absent)
+    bump_version_from_tag
+
+    # 2. Build the AAB
+    UI.message "🔨 Building Android App Bundle (release)…"
+    sh("flutter", "build", "appbundle", "--release",
+       chdir: FLUTTER_ROOT)
+
+    aab_path = File.join(
+      FLUTTER_ROOT,
+      "build/app/outputs/bundle/release/app-release.aab"
+    )
+
+    # 3. Upload to Play Store
+    upload_to_play_store(
+      track:                  "internal",
+      aab:                    aab_path,
+      json_key:               ENV["PLAY_STORE_JSON_KEY_PATH"],
+      package_name:           "com.hiltking.app",
+      release_status:         "draft",
+      skip_upload_apk:        true,
+      skip_upload_metadata:   false,
+      skip_upload_changelogs: false,
+      skip_upload_images:     true,
+      skip_upload_screenshots: true
+    )
+
+    UI.success "✅ Android: uploaded to Play Store internal track"
+  end
+
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# iOS PLATFORM
+# ─────────────────────────────────────────────────────────────────────────────
+platform :ios do
+
+  # ── deploy_testflight ───────────────────────────────────────────────────────
+  desc "Sign, build, and upload an IPA to TestFlight"
+  lane :deploy_testflight do
+
+    # 1. Bump version
+    bump_version_from_tag
+
+    # 2. Sync provisioning profiles via match
+    match(
+      type:                        "appstore",
+      app_identifier:              "com.hiltking.hiltMobile",
+      git_url:                     ENV["MATCH_GIT_URL"],
+      readonly:                    is_ci,
+      keychain_name:               ENV.fetch("MATCH_KEYCHAIN_NAME", "login"),
+      keychain_password:           ENV.fetch("MATCH_KEYCHAIN_PASSWORD", "")
+    )
+
+    # 3. Ensure build number matches pubspec build number
+    pubspec_version = pubspec_version_string
+    build_number    = pubspec_version.split("+").last.to_i
+    increment_build_number(
+      build_number:  build_number,
+      xcodeproj:     File.join(IOS_ROOT, "Runner.xcodeproj")
+    )
+    increment_version_number(
+      version_number: pubspec_version.split("+").first,
+      xcodeproj:      File.join(IOS_ROOT, "Runner.xcodeproj")
+    )
+
+    # 4. Build the IPA via Flutter
+    UI.message "🔨 Building iOS IPA (release)…"
+    sh("flutter", "build", "ipa", "--release", "--no-codesign",
+       chdir: FLUTTER_ROOT)
+
+    ipa_path = Dir[File.join(FLUTTER_ROOT, "build/ios/ipa/*.ipa")].first
+    UI.user_error!("IPA not found – did the build succeed?") unless ipa_path
+
+    # 5. Upload to TestFlight
+    upload_to_testflight(
+      ipa:                    ipa_path,
+      api_key_path:           ENV["APP_STORE_CONNECT_API_KEY_PATH"],
+      skip_waiting_for_build_processing: true
+    )
+
+    UI.success "✅ iOS: uploaded to TestFlight"
+  end
+
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIVATE HELPERS  (shared across platforms)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Returns the current pubspec version string, e.g. "1.0.3+12"
+private_lane :pubspec_version_string do
+  raw = File.read(PUBSPEC)
+  match = raw.match(/^version:\s*(.+)$/)
+  UI.user_error!("Cannot parse version from pubspec.yaml") unless match
+  match[1].strip
+end
+
+# Reads the latest semver Git tag (e.g. v1.2.0) and rewrites pubspec.yaml
+# version field to match, preserving the build number as an auto-increment.
+# Skips gracefully when no tags exist (e.g. on first run).
+private_lane :bump_version_from_tag do
+  tag = sh("git", "describe", "--tags", "--match", "v*",
+           "--abbrev=0", chdir: FLUTTER_ROOT).strip rescue nil
+
+  unless tag && !tag.empty?
+    UI.important "No semver Git tag found – keeping current pubspec version"
+    next
+  end
+
+  semver = tag.delete_prefix("v")  # e.g. "1.2.0"
+  UI.message "🏷  Latest tag: #{tag}  → version #{semver}"
+
+  # Derive the new build number from the tag's commit distance
+  commit_distance = sh(
+    "git", "rev-list", "#{tag}..HEAD", "--count",
+    chdir: FLUTTER_ROOT
+  ).strip.to_i rescue 0
+
+  # Build number = base build from tag + commits since
+  current_build = pubspec_version_string.split("+").last.to_i rescue 1
+  new_build     = current_build + commit_distance
+
+  new_version = "#{semver}+#{new_build}"
+  UI.message "📝 Writing pubspec version: #{new_version}"
+
+  # Rewrite pubspec.yaml in-place
+  content     = File.read(PUBSPEC)
+  updated     = content.sub(/^version:\s*.+$/, "version: #{new_version}")
+  File.write(PUBSPEC, updated)
+
+  UI.success "pubspec.yaml version → #{new_version}"
+end

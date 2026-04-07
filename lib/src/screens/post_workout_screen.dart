@@ -35,26 +35,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
   final ScreenshotController _screenshotController = ScreenshotController();
   bool _isSharing = false;
 
-  /// Re-derives grade when peakBpm is updated manually.
-  /// Mirrors the grading logic in WorkoutManager._buildSessionData.
-  void _onManualBpmReceived(int bpm) {
-    setState(() {
-      widget.session.peakBpm = bpm;
-      // Recalculate grade: A if time-in-zone is solid and peak is high, B for good, C otherwise.
-      final inZone = widget.session.timeInTargetZone;
-      final duration = widget.session.durationSeconds ?? widget.session.heartRateReadings.length;
-      final ratio = duration > 0 ? inZone / duration : 0.0;
-      String newGrade;
-      if (ratio >= 0.7 && bpm >= 150) {
-        newGrade = 'A';
-      } else if (ratio >= 0.4 || bpm >= 130) {
-        newGrade = 'B';
-      } else {
-        newGrade = 'C';
-      }
-      widget.session.grade = newGrade;
-    });
-  }
+
 
   @override
   void initState() {
@@ -189,16 +170,53 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                           ),
                         ),
                       // 1. Header Hierarchy (Grade + Output)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.center,
+                      Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.center,
                         children: [
-                          _buildGradeBadge(context, grade, gradeColor),
+                          // ── Center Peak BPM ──
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '${widget.session.peakBpm}',
+                                style: const TextStyle(
+                                  fontSize: 72,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF00897B),
+                                  height: 1.0,
+                                ),
+                              ),
+                              const Text(
+                                'PEAK BPM',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black54,
+                                  letterSpacing: 2.0,
+                                ),
+                              ),
+                            ],
+                          ),
+                          // ── Top-Left Grade Badge ──
+                          Align(
+                            alignment: Alignment.topLeft,
+                            child: Transform.scale(
+                              scale: 0.65,
+                              alignment: Alignment.topLeft,
+                              child: _buildGradeBadge(context, grade, gradeColor),
+                            ),
+                          ),
+                          // ── Right Side Output Card (if applicable) ──
                           if (widget.session.totalVolume != null &&
                               widget.session.totalVolume! > 0)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 24),
-                              child: _buildStrengthOutputCard(context),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Transform.scale(
+                                scale: 0.8,
+                                alignment: Alignment.centerRight,
+                                child: _buildStrengthOutputCard(context),
+                              ),
                             ),
                         ],
                       ),
@@ -330,55 +348,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
                   child: Column(
                     children: [
-                      // ── Manual BPM button (no-watch path) ──
-                      if (widget.session.peakBpm == 0 || widget.isFromHistory)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: SizedBox(
-                            width: double.infinity,
-                            height: 52,
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.favorite_border, size: 18),
-                              label: Text(
-                                widget.session.peakBpm > 0
-                                    ? 'RE-MEASURE  (${widget.session.peakBpm} BPM)'
-                                    : 'NO WATCH? MEASURE MANUALLY',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF00897B),
-                                side: const BorderSide(
-                                    color: Color(0xFF00897B), width: 1.5),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14)),
-                              ),
-                              onPressed: () async {
-                                final route = widget.cameraScreenBuilder != null
-                                    ? MaterialPageRoute<int>(
-                                        builder: widget.cameraScreenBuilder!)
-                                    : MaterialPageRoute<int>(
-                                        builder: (_) => const CameraBpmScreen());
-                                final bpm =
-                                    await Navigator.of(context).push<int>(route);
-                                if (bpm != null && bpm > 0) {
-                                  _onManualBpmReceived(bpm);
-                                  if (widget.isFromHistory) {
-                                    // Also persist immediately for History path
-                                    if (mounted) {
-                                      await context
-                                          .read<WorkoutManager>()
-                                          .updatePeakBpm(widget.session.id, bpm);
-                                    }
-                                  }
-                                }
-                              },
-                            ),
-                          ),
-                        ),
+
 
                       // ── DONE button ──
                       SizedBox(
@@ -543,7 +513,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                             icon: Icons.edit,
                             onTap: () => _showEditDistanceDialog(context),
                           )
-                        : _statItem("PEAK BPM", "${widget.session.peakBpm}")),
+                        : _statItem("ZONE", widget.session.peakBpm >= 150 ? "ELITE" : (widget.session.peakBpm >= 120 ? "ACTIVE" : "WARMUP"))),
               ],
             ),
           ),

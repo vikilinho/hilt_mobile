@@ -13,8 +13,11 @@ enum _BpmState { waitingForFinger, stabilizing, ready }
 
 class CameraBpmScreen extends StatefulWidget {
   // ── Production constructor ────────────────────────────────────────────────
-  const CameraBpmScreen({super.key})
-      : bpmStream = null,
+  const CameraBpmScreen({
+    super.key,
+    this.forced = false,
+    this.message,
+  })  : bpmStream = null,
         grantCameraForTesting = false;
 
   // ── Test constructor ──────────────────────────────────────────────────────
@@ -26,15 +29,14 @@ class CameraBpmScreen extends StatefulWidget {
   const CameraBpmScreen.forTesting({
     super.key,
     required this.bpmStream,
+    this.forced = false,
+    this.message,
   }) : grantCameraForTesting = true;
 
-  /// Injected BPM source used by [CameraBpmScreen.forTesting].
-  /// `null` in production mode — [HeartBPMDialog] is used instead.
   final Stream<int>? bpmStream;
-
-  /// When `true`, skips the real [Permission.camera.request()] call and
-  /// treats the camera as already available.
   final bool grantCameraForTesting;
+  final bool forced;
+  final String? message;
 
   @override
   State<CameraBpmScreen> createState() => _CameraBpmScreenState();
@@ -125,24 +127,28 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope(
+      canPop: !widget.forced,
+      child: Scaffold(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text(
-          'HEART RATE',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.5,
-            fontSize: 16,
+        appBar: AppBar(
+          automaticallyImplyLeading: !widget.forced,
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: const Text(
+            'HEART RATE',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+              fontSize: 16,
+            ),
           ),
+          centerTitle: true,
         ),
-        centerTitle: true,
+        body: !_cameraPermissionGranted
+            ? _buildPermissionPrompt()
+            : _buildMeasurementUI(),
       ),
-      body: !_cameraPermissionGranted
-          ? _buildPermissionPrompt()
-          : _buildMeasurementUI(),
     );
   }
 
@@ -257,6 +263,22 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
           ),
           textAlign: TextAlign.center,
         ),
+        if (widget.message != null) ...[
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Text(
+              widget.message!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _hiltTeal,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

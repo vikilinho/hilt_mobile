@@ -12,6 +12,7 @@ import '../widgets/heart_rate_pulse.dart';
 import '../widgets/strength_visual_guide.dart'; // Import library
 import '../widgets/equipment_selector.dart';
 import 'post_workout_screen.dart';
+import 'camera_bpm_screen.dart';
 import 'package:confetti/confetti.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -45,18 +46,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _onSessionComplete(WorkoutSession session) async {
     if (mounted) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PostWorkoutSummaryScreen(
-            session: session,
-          ),
-        ),
-      );
+      final manager = context.read<WorkoutManager>();
+      
+      if (manager.requiresManualBpmCapture) {
+         final bpm = await Navigator.of(context).push<int>(MaterialPageRoute(
+             builder: (_) => const CameraBpmScreen(
+                 forced: true,
+                 message: "Session Complete. Place finger on camera to lock in your Peak BPM.",
+             )
+         ));
+         if (bpm != null && bpm > 0) {
+             manager.recalculateGrade(session, bpm);
+             await manager.updatePeakBpm(session.id, bpm);
+         }
+      }
 
       if (mounted) {
-        final manager = context.read<WorkoutManager>();
-        if (manager.history.length % 5 == 0 && manager.history.isNotEmpty) {
-          _confettiController.play();
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PostWorkoutSummaryScreen(
+              session: session,
+            ),
+          ),
+        );
+
+        if (mounted) {
+          if (manager.history.length % 5 == 0 && manager.history.isNotEmpty) {
+            _confettiController.play();
+          }
         }
       }
     }

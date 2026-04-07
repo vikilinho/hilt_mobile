@@ -78,6 +78,26 @@ class WorkoutManager extends ChangeNotifier {
 
   bool get isComboSession => _workoutQueue.length > 1;
 
+  bool get requiresManualBpmCapture =>
+      _currentSessionReadings.isEmpty ||
+      _currentSessionReadings.every((bpm) => bpm == 0);
+
+  void recalculateGrade(WorkoutSession session, int newPeakBpm) {
+    session.peakBpm = newPeakBpm;
+    final inZone = session.timeInTargetZone;
+    final duration = session.durationSeconds ?? session.heartRateReadings.length;
+    final ratio = duration > 0 ? inZone / duration : 0.0;
+    String newGrade;
+    if (ratio >= 0.7 && newPeakBpm >= 150) {
+      newGrade = 'A';
+    } else if (ratio >= 0.4 || newPeakBpm >= 130) {
+      newGrade = 'B';
+    } else {
+      newGrade = 'C';
+    }
+    session.grade = newGrade;
+  }
+
   // Treadmill Speed/Distance Tracking (from Watch)
   final TreadmillHandler _treadmillHandler = TreadmillHandler();
 
@@ -944,9 +964,11 @@ class WorkoutManager extends ChangeNotifier {
     }
   }
 
+  final _watchConnectivity = WatchConnectivity();
+
   void _initDataLayer() {
     print("[Mobile] Initializing Watch Connectivity...");
-    WatchConnectivity().messageStream.listen((message) {
+    _watchConnectivity.messageStream.listen((message) {
       if (message.containsKey('bpm') && message['bpm'] is int) {
         final bpm = message['bpm'] as int;
         print("[Mobile] Received BPM: $bpm");

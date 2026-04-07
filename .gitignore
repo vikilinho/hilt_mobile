@@ -48,3 +48,18 @@ app.*.map.json
 android/key.properties
 android/app/*.jks
 android/app/*.jks.old
+
+# Fastlane secrets and generated files
+fastlane/.env
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+*.p8
+play-store-key.json
+AuthKey*.p8
+Gemfile.lock
+
+# Bundler local install (used for fastlane)
+vendor/bundle/
+.bundle/
