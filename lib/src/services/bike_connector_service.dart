@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter_ftms/flutter_ftms.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -25,21 +26,27 @@ class BikeConnectorService {
 
   BikeConnectorService() {
     _statusController.add(_status);
-    _initBluetoothMonitor();
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _initBluetoothMonitor();
+    }
   }
 
   void _initBluetoothMonitor() {
-    FlutterBluePlus.adapterState.listen((state) {
-      if (state == BluetoothAdapterState.off) {
-        _updateStatus(BikeConnectionStatus.bluetoothOff);
-      } else if (state == BluetoothAdapterState.unauthorized) {
-        _updateStatus(BikeConnectionStatus.unauthorized);
-      } else if (state == BluetoothAdapterState.on &&
-          (_status == BikeConnectionStatus.bluetoothOff ||
-              _status == BikeConnectionStatus.unauthorized)) {
-        _updateStatus(BikeConnectionStatus.disconnected);
-      }
-    });
+    try {
+      FlutterBluePlus.adapterState.listen((state) {
+        if (state == BluetoothAdapterState.off) {
+          _updateStatus(BikeConnectionStatus.bluetoothOff);
+        } else if (state == BluetoothAdapterState.unauthorized) {
+          _updateStatus(BikeConnectionStatus.unauthorized);
+        } else if (state == BluetoothAdapterState.on &&
+            (_status == BikeConnectionStatus.bluetoothOff ||
+                _status == BikeConnectionStatus.unauthorized)) {
+          _updateStatus(BikeConnectionStatus.disconnected);
+        }
+      });
+    } catch (e) {
+      print("FlutterBluePlus init error: $e");
+    }
   }
 
   Future<void> requestPermissions() async {

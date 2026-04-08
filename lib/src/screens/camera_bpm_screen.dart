@@ -50,6 +50,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   final List<int> _readings = [];
   bool _fingerDetected = false;
   bool _cameraPermissionGranted = false;
+  int _warmupCount = 0; // frames discarded per finger placement (auto-exposure settle)
 
   StreamSubscription<int>? _bpmSubscription;
 
@@ -101,18 +102,36 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     if (!mounted) return;
     setState(() {
       // Finger detection heuristic: BPM within the physiological range.
-      _fingerDetected = bpm >= 40 && bpm <= 220;
+      final inRange = bpm >= 40 && bpm <= 220;
+      _fingerDetected = inRange;
 
-      if (_fingerDetected) {
-        if (_readings.length < BpmFilter.bufferTarget) {
-          _readings.add(bpm);
-        }
-        _state = BpmFilter.canLock(_readings)
-            ? _BpmState.ready
-            : _BpmState.stabilizing;
-      } else {
+      if (!inRange) {
+        // Finger removed — clear stale readings so the next placement
+        // starts from a clean slate and can't be biased by earlier data.
+        _readings.clear();
+        _warmupCount = 0;
         _state = _BpmState.waitingForFinger;
+        return;
       }
+
+      // Warm-up: the camera's auto-exposure takes a few frames to settle.
+      // Discard [BpmFilter.warmupReadings] readings before buffering anything.
+      if (_warmupCount < BpmFilter.warmupReadings) {
+        _warmupCount++;
+        _state = _BpmState.stabilizing;
+        return;
+      }
+
+      // Pre-buffer artefact gate: reject readings that deviate too far from
+      // the established median (motion spikes, finger shift artefacts).
+      if (!BpmFilter.isPlausibleReading(bpm, _readings)) return;
+
+      if (_readings.length < BpmFilter.bufferTarget) {
+        _readings.add(bpm);
+      }
+      _state = BpmFilter.canLock(_readings)
+          ? _BpmState.ready
+          : _BpmState.stabilizing;
     });
   }
 

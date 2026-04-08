@@ -211,7 +211,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
       itemBuilder: (context, index) {
         final entry = sessions[index];
         final steps = entry.steps ?? 0;
-        final isMatchReady = steps >= 10000;
 
         return Dismissible(
           key: ValueKey('walk_\${entry.id}'),
@@ -285,9 +284,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             .headlineSmall
                             ?.copyWith(
                               fontWeight: FontWeight.w900,
-                              color: isMatchReady
-                                  ? const Color(0xFF00897B)
-                                  : Colors.black87,
+                              color: Colors.black87,
                             ),
                       ),
                       Text(
@@ -302,27 +299,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     ],
                   ),
 
-                  const SizedBox(width: 16),
 
-                  // Match Ready Icon
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: isMatchReady
-                          ? const Color(0xFF00897B).withOpacity(0.1)
-                          : Colors.grey.shade100,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      isMatchReady
-                          ? Icons.check_circle_rounded
-                          : Icons.directions_walk,
-                      color: isMatchReady
-                          ? const Color(0xFF00897B)
-                          : Colors.grey.shade400,
-                    ),
-                  ),
                 ],
               ),
             ),

@@ -1,5 +1,5 @@
 import 'dart:async';
-
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:hilt_core/hilt_core.dart';
@@ -862,6 +862,11 @@ class WorkoutManager extends ChangeNotifier {
 
   SessionRepository? get repo => _repo;
 
+  @visibleForTesting
+  set repo(SessionRepository? repo) {
+    _repo = repo;
+  }
+
   Future<void> _initDb() async {
     final dir = await getApplicationDocumentsDirectory();
     final isar = await Isar.open(
@@ -874,6 +879,7 @@ class WorkoutManager extends ChangeNotifier {
   }
 
   Future<void> _performSafetySync() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     try {
       if (_repo == null) return;
       

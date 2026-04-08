@@ -441,7 +441,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           return StreamBuilder<DailyActivity?>(
                             stream: manager.repo!.isar.dailyActivitys.watchObject(naturalId, fireImmediately: true),
                             builder: (context, snapshot) {
-                              final int liveSteps = snapshot.data?.totalSteps ?? stepService.dailySteps;
+                              final int liveSteps = snapshot.data?.totalSteps ?? 0;
                               final int goal = stepService.stepGoal;
 
                           return Padding(

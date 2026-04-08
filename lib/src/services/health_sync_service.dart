@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:health/health.dart';
 import 'package:hilt_core/hilt_core.dart';
@@ -6,15 +7,13 @@ import 'package:isar/isar.dart';
 import 'step_service.dart';
 import '../workout_manager.dart'; // To access the repository
 
-class HealthSyncService with WidgetsBindingObserver {
+class HealthSyncService {
   final Health _health = Health();
   final StepService _stepService;
   WorkoutManager? _workoutManager;
   Isar? _isar;
 
-  HealthSyncService(this._stepService) {
-    WidgetsBinding.instance.addObserver(this);
-  }
+  HealthSyncService(this._stepService);
 
   void updateDependencies(WorkoutManager manager) {
     if (_workoutManager == null) {
@@ -26,13 +25,6 @@ class HealthSyncService with WidgetsBindingObserver {
 
   Future<void> _init() async {
     await fetchDailySteps();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      fetchDailySteps();
-    }
   }
 
   static int generateDailyId(DateTime date) {
@@ -56,20 +48,31 @@ class HealthSyncService with WidgetsBindingObserver {
     // Natural ID format: yyyyMMdd
     final naturalId = generateDailyId(midnight);
 
+    // ZERO-STATE INITIALIZATION:
+    // Ensure an anchor exists for today before processing deltas to prevent ghost steps.
+    final existing = await _isar!.dailyActivitys.get(naturalId);
+    if (existing == null) {
+      await _saveToIsar(naturalId, midnight, 0);
+    }
+
     final types = [HealthDataType.STEPS];
     final perms = [HealthDataAccess.READ];
 
-    bool? hasPermissions = await _health.hasPermissions(types, permissions: perms);
-    if (hasPermissions != true) {
-      final granted = await _health.requestAuthorization(types, permissions: perms);
-      if (!granted) {
-        // Permission denied: Use hardware sensor
-        _fallbackToHardwareSensor(naturalId, midnight);
-        return;
+    bool? hasPermissions = true;
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      hasPermissions = await _health.hasPermissions(types, permissions: perms);
+      if (hasPermissions != true) {
+        final granted = await _health.requestAuthorization(types, permissions: perms);
+        if (!granted) {
+          // Permission denied: Use hardware sensor
+          _fallbackToHardwareSensor(naturalId, midnight);
+          return;
+        }
       }
     }
 
     try {
+      // EXPLICIT HISTORICAL RANGE: Start of day -> Now
       final healthData = await _health.getHealthDataFromTypes(
         startTime: midnight,
         endTime: now,
@@ -113,9 +116,5 @@ class HealthSyncService with WidgetsBindingObserver {
     // Read from existing step service
     final fallbackSteps = _stepService.dailySteps;
     _saveToIsar(id, midnight, fallbackSteps);
-  }
-
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
   }
 }

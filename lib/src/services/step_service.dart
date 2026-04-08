@@ -27,6 +27,9 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
   int _currentSteps = 0;
   int get dailySteps => _currentSteps;
+  
+  @visibleForTesting
+  set dailySteps(int steps) => _currentSteps = steps;
   int get stepGoal => _userStats?.stepGoal ?? 10000;
   bool get isMatchReady => dailySteps >= stepGoal;
 
