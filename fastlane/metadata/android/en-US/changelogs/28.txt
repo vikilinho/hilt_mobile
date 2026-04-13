@@ -1,0 +1,3 @@
+Improved camera finger detection so the scanner responds when your fingertip covers the lens, not when it moves away
+Reduced false finger matches from uncovered camera frames for more reliable BPM capture
+Kept the post-workout flow streamlined by using the camera scanner only when watch heart-rate data is unavailable

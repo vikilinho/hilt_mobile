@@ -82,6 +82,22 @@ class WorkoutManager extends ChangeNotifier {
       _currentSessionReadings.isEmpty ||
       _currentSessionReadings.every((bpm) => bpm == 0);
 
+  bool sessionNeedsManualBpmCapture(WorkoutSession session) {
+    final readings = session.heartRateReadings;
+    final positiveReadingCount = readings.where((bpm) => bpm > 0).length;
+    final hasSessionHeartRate =
+        session.peakBpm > 0 ||
+        session.averageBpm > 0 ||
+        positiveReadingCount >= 3;
+    final hasRecentLiveHeartRate =
+        _currentBpm > 0 &&
+        _lastHeartRateTime != null &&
+        DateTime.now().difference(_lastHeartRateTime!) <
+            const Duration(minutes: 5);
+    final hasRecordedHeartRate = hasSessionHeartRate || hasRecentLiveHeartRate;
+    return !hasRecordedHeartRate;
+  }
+
   void recalculateGrade(WorkoutSession session, int newPeakBpm) {
     session.peakBpm = newPeakBpm;
     final inZone = session.timeInTargetZone;
@@ -356,6 +372,7 @@ class WorkoutManager extends ChangeNotifier {
     if (save) {
       session = await _buildSessionData();
       if (session != null) {
+        await saveSessionToDatabase(session);
         _sessionCompleteController.add(session);
       }
     }
@@ -381,11 +398,14 @@ class WorkoutManager extends ChangeNotifier {
     return session;
   }
 
-  Future<void> saveSessionToDatabase(WorkoutSession session) async {
+  Future<void> saveSessionToDatabase(WorkoutSession session,
+      {bool refresh = true}) async {
     try {
       await _repo?.saveSession(session);
       print("[Storage] Session formally saved: ${session.id}");
-      await refreshHistory();
+      if (refresh) {
+        await refreshHistory();
+      }
     } catch (e) {
       print("[Storage] Error saving session: $e");
     }
@@ -815,10 +835,13 @@ class WorkoutManager extends ChangeNotifier {
     }
   }
 
-  Future<void> updatePeakBpm(int sessionId, int bpm) async {
+  Future<void> updatePeakBpm(int sessionId, int bpm, {String? grade}) async {
     try {
       final session = _history.firstWhere((s) => s.id == sessionId);
       session.peakBpm = bpm;
+      if (grade != null) {
+        session.grade = grade;
+      }
       await _repo?.saveSession(session);
       await refreshHistory();
     } catch (e) {
@@ -882,31 +905,33 @@ class WorkoutManager extends ChangeNotifier {
     if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     try {
       if (_repo == null) return;
-      
+
       final sessions = await _repo!.getAllSessions();
-      
-      // Check if we already have a significant amount of Daily Steps populated recently.
       final now = DateTime.now();
       final midnight = DateTime(now.year, now.month, now.day);
-      final sevenDaysAgo = midnight.subtract(const Duration(days: 7));
-      
-      bool alreadyHasRecentHistory = sessions.any((s) => 
-         (s.comboNames?.contains('Daily Steps') ?? false) && 
-         s.timestamp.isAfter(sevenDaysAgo) && 
-         s.timestamp.isBefore(midnight)
-      );
-      
-      if (alreadyHasRecentHistory) {
-         print("[Mobile] Safety Sync skipped: recent daily steps already logged.");
-         return; 
-      }
-      
-      print("[Mobile] Performing Safety Sync: Fetching past 7 days of Health Connect steps...");
-      
+      final latestDailySession = sessions
+          .where((s) => s.comboNames?.contains('Daily Steps') ?? false)
+          .fold<WorkoutSession?>(null, (latest, session) {
+        if (latest == null) return session;
+        return session.timestamp.isAfter(latest.timestamp) ? session : latest;
+      });
+
+      final defaultStart = midnight.subtract(const Duration(days: 30));
+      final rangeStart = latestDailySession == null
+          ? defaultStart
+          : DateTime(
+              latestDailySession.timestamp.year,
+              latestDailySession.timestamp.month,
+              latestDailySession.timestamp.day,
+            );
+
+      print(
+          "[Mobile] Performing Safety Sync: Fetching Health Connect steps from $rangeStart to $now...");
+
       final health = Health();
       final types = [HealthDataType.STEPS];
       final perms = [HealthDataAccess.READ];
-      
+
       bool? hasPermissions = await health.hasPermissions(types, permissions: perms);
       if (hasPermissions != true) {
           final granted = await health.requestAuthorization(types, permissions: perms);
@@ -916,7 +941,7 @@ class WorkoutManager extends ChangeNotifier {
           }
       }
       final healthData = await health.getHealthDataFromTypes(
-        startTime: sevenDaysAgo,
+        startTime: rangeStart,
         endTime: now,
         types: types,
       );
@@ -936,38 +961,56 @@ class WorkoutManager extends ChangeNotifier {
          return;
       }
       
-      for (var entry in stepsPerDay.entries) {
-          final date = entry.key;
-          final totalSteps = entry.value;
+      for (final entry in stepsPerDay.entries) {
+        final date = entry.key;
+        final totalSteps = entry.value;
 
-          final distanceInMiles =
-              double.parse((totalSteps * 0.00047).toStringAsFixed(1));
-          final caloriesBurned =
-              double.parse((totalSteps * 0.04).toStringAsFixed(1));
-          
-          final session = WorkoutSession()
-            ..timestamp = DateTime(date.year, date.month, date.day, 23, 59)
-            ..sportType = SportType.custom
-            ..steps = totalSteps
-            ..distance = distanceInMiles
-            ..calories = caloriesBurned
-            ..heartRateReadings = []
-            ..averageBpm = 0
-            ..peakBpm = 0
-            ..timeInTargetZone = 0
-            ..grade = '-'
-            ..durationSeconds = 0
-            ..comboNames = ['Daily Steps'];
-            
-          await _repo!.saveSession(session);
+        final existing = sessions.where((s) {
+          if (!(s.comboNames?.contains('Daily Steps') ?? false)) {
+            return false;
+          }
+
+          final sessionDay =
+              DateTime(s.timestamp.year, s.timestamp.month, s.timestamp.day);
+          return sessionDay.isAtSameMomentAs(date);
+        }).lastOrNull;
+
+        final distanceInMiles =
+            double.parse((totalSteps * 0.00047).toStringAsFixed(1));
+        final caloriesBurned =
+            double.parse((totalSteps * 0.04).toStringAsFixed(1));
+
+        final session = existing ??
+            (WorkoutSession()
+              ..timestamp = DateTime(date.year, date.month, date.day, 23, 59)
+              ..sportType = SportType.custom
+              ..heartRateReadings = []
+              ..averageBpm = 0
+              ..peakBpm = 0
+              ..timeInTargetZone = 0
+              ..grade = '-'
+              ..durationSeconds = 0
+              ..comboNames = ['Daily Steps']);
+
+        session
+          ..timestamp = DateTime(date.year, date.month, date.day, 23, 59)
+          ..steps = totalSteps
+          ..distance = distanceInMiles
+          ..calories = caloriesBurned;
+
+        await _repo!.saveSession(session);
       }
       
       await refreshHistory();
-      print("[Mobile] Safety Sync Complete: Inserted ${stepsPerDay.length} historical days.");
+      print("[Mobile] Safety Sync Complete: Upserted ${stepsPerDay.length} daily step records.");
       
     } catch (e) {
       print("[Mobile] Error during Safety Sync: $e");
     }
+  }
+
+  Future<void> syncStepHistory() async {
+    await _performSafetySync();
   }
 
   final _watchConnectivity = WatchConnectivity();

@@ -408,7 +408,7 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, -5),
                 ),
@@ -488,7 +488,7 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.1),
+                    color: Colors.green.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.green),
                   ),
@@ -692,7 +692,7 @@ class _CategoryCardState extends State<_CategoryCard>
     setState(() {
       _scale = 0.97;
       _shadowSpread = 15.0;
-      _shadowColor = widget.primaryColor.withOpacity(0.4);
+      _shadowColor = widget.primaryColor.withValues(alpha: 0.4);
     });
   }
 
@@ -759,7 +759,7 @@ class _CategoryCardState extends State<_CategoryCard>
                     child: Icon(
                       widget.icon,
                       size: 140,
-                      color: Colors.white.withOpacity(0.15),
+                      color: Colors.white.withValues(alpha: 0.15),
                     ),
                   ),
 
@@ -784,9 +784,9 @@ class _CategoryCardState extends State<_CategoryCard>
                                 begin: Alignment(slide - 1.0, -1.0),
                                 end: Alignment(slide, 1.0),
                                 colors: [
-                                  Colors.white.withOpacity(0.0),
-                                  Colors.white.withOpacity(0.15),
-                                  Colors.white.withOpacity(0.0),
+                                  Colors.white.withValues(alpha: 0.0),
+                                  Colors.white.withValues(alpha: 0.15),
+                                  Colors.white.withValues(alpha: 0.0),
                                 ],
                                 stops: const [0.0, 0.5, 1.0],
                               ),
@@ -805,7 +805,7 @@ class _CategoryCardState extends State<_CategoryCard>
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             shape: BoxShape.circle,
                           ),
                           child:
@@ -828,7 +828,7 @@ class _CategoryCardState extends State<_CategoryCard>
                               widget.subtitle,
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.white.withOpacity(0.9),
+                                color: Colors.white.withValues(alpha: 0.9),
                                 fontWeight: FontWeight.w500,
                               ),
                             ),

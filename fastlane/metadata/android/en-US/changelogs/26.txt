@@ -1,0 +1,6 @@
+What's new in build 26:
+
+- Removed the extra scanner instruction sheet so the camera flow opens directly on the capture screen
+- Reskinned the heart-rate scanner back into Hilt King’s visual language
+- Simplified scanner guidance copy and tightened the finger placement messaging
+- Kept automatic BPM lock-in once the scan reaches a stable result

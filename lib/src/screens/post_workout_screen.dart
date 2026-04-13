@@ -56,11 +56,15 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
           fileName: "hilt_workout_${widget.session.id}.png");
 
       if (imagePath != null) {
-        await Share.shareXFiles([XFile(imagePath)],
-            text: 'Check out my HILT workout session!');
+        await SharePlus.instance.share(
+          ShareParams(
+            text: 'Check out my HILT workout session!',
+            files: [XFile(imagePath)],
+          ),
+        );
       }
     } catch (e) {
-      print("Error sharing: $e");
+      debugPrint('Error sharing: $e');
     } finally {
       if (mounted) setState(() => _isSharing = false);
     }
@@ -96,7 +100,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.1), // Subtle shadow
+                    color: Colors.black.withValues(alpha: 0.1), // Subtle shadow
                     blurRadius: 6,
                     offset: const Offset(0, 2),
                   )
@@ -152,7 +156,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 12, vertical: 6),
                                     decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.05),
+                                      color: Colors.black.withValues(alpha: 0.05),
                                       borderRadius: BorderRadius.circular(16),
                                     ),
                                     child: Text(
@@ -333,7 +337,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                                   y1: targetBpm,
                                   y2: 200,
                                   color: hiltTeal
-                                      .withOpacity(0.05), // Subtle Teal fill
+                                      .withValues(alpha: 0.05), // Subtle Teal fill
                                 ),
                               ],
                             ),
@@ -477,7 +481,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
   Widget _buildTacticalDataGrid(BuildContext context) {
     const dividerColor = Color(0xFF00897B); // Hilt Teal
     // 0.3 opacity for dividers
-    final subtleDivider = dividerColor.withOpacity(0.3);
+    final subtleDivider = dividerColor.withValues(alpha: 0.3);
     const dividerThickness = 1.0;
 
     final isTreadmill = widget.session.distance != null;
@@ -706,13 +710,13 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
     BoxShadow? glow;
     if (grade == 'B') {
       glow = BoxShadow(
-        color: Colors.amber.withOpacity(0.4),
+        color: Colors.amber.withValues(alpha: 0.4),
         blurRadius: 30,
         spreadRadius: 5,
       );
     } else if (grade == 'A') {
       glow = BoxShadow(
-        color: const Color(0xFF00E676).withOpacity(0.4),
+        color: const Color(0xFF00E676).withValues(alpha: 0.4),
         blurRadius: 30,
         spreadRadius: 5,
       );
@@ -762,12 +766,12 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               )
             ],
-            border: Border.all(color: Colors.blueAccent.withOpacity(0.2)),
+            border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.2)),
           ),
           child: Column(
             children: [

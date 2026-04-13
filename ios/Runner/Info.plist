@@ -49,6 +49,8 @@
 	<!-- Privacy Permissions for Hilt King -->
 	<key>NSMotionUsageDescription</key>
 	<string>This app requires access to the pedometer to track your live steps and generate your walk history.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera and flash to measure your heart rate from your fingertip.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>This app securely reads your daily step count and energy expenditure from HealthKit to synchronize your fitness data.</string>
 	<key>NSHealthUpdateUsageDescription</key>

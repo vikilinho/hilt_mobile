@@ -1,0 +1,5 @@
+What's new in build 27:
+
+- Fixed the post-workout flow so Match Report opens directly when BPM was already received from the Hilt King watch
+- Keeps the camera heart-rate scanner as a fallback only when no usable watch BPM was captured
+- Preserves the simplified Hilt-style scanner guidance and automatic BPM lock-in behavior

@@ -48,16 +48,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (mounted) {
       final manager = context.read<WorkoutManager>();
       
-      if (manager.requiresManualBpmCapture) {
+      if (manager.sessionNeedsManualBpmCapture(session)) {
          final bpm = await Navigator.of(context).push<int>(MaterialPageRoute(
              builder: (_) => const CameraBpmScreen(
                  forced: true,
-                 message: "Session Complete. Place finger on camera to lock in your Peak BPM.",
+                 message: "Hold still while we capture your Peak BPM",
              )
          ));
          if (bpm != null && bpm > 0) {
              manager.recalculateGrade(session, bpm);
-             await manager.updatePeakBpm(session.id, bpm);
+             await manager.updatePeakBpm(session.id, bpm, grade: session.grade);
          }
       }
 
@@ -97,7 +97,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // Pulse Red if true
     final pulseColor = (state?.isBelowTarget ?? false)
-        ? Colors.red.withOpacity(0.2)
+        ? Colors.red.withValues(alpha: 0.2)
         : Colors.transparent;
 
     return Scaffold(
@@ -352,7 +352,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color:
-                                      const Color(0xFF43A047).withOpacity(0.2),
+                                      const Color(0xFF43A047).withValues(alpha: 0.2),
                                   width: 20,
                                 ),
                               ),
@@ -892,7 +892,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF00897B).withOpacity(0.2),
+            color: const Color(0xFF00897B).withValues(alpha: 0.2),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -965,7 +965,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF00897B).withOpacity(0.4),
+                  color: const Color(0xFF00897B).withValues(alpha: 0.4),
                   blurRadius: 8,
                   offset: const Offset(0, 4),
                 ),
@@ -1034,7 +1034,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           border: InputBorder.none,
           hintText: "0",
           hintStyle: TextStyle(
-            color: const Color(0xFF00897B).withOpacity(0.3), // Green hint
+            color: const Color(0xFF00897B).withValues(alpha: 0.3), // Green hint
             fontSize: 16,
           ),
           suffixText: label,

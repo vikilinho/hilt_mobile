@@ -1,0 +1,6 @@
+What's new in build 25:
+
+- Tightened the finger-detection state machine to reduce false positives and mid-scan flicker
+- Improved the scan UI so finger placement and pulse capture are communicated more clearly
+- Kept automatic BPM lock-in once the scan reaches a stable result
+- Skips the post-workout camera scan when the session already has heart-rate data from the watch

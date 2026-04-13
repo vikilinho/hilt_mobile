@@ -94,8 +94,8 @@ class _ExerciseVisualState extends State<ExerciseVisual>
               boxShadow: [
                 BoxShadow(
                   color: widget.isPulse
-                      ? neonGreen.withOpacity(0.6)
-                      : tealColor.withOpacity(0.2),
+                      ? neonGreen.withValues(alpha: 0.6)
+                      : tealColor.withValues(alpha: 0.2),
                   blurRadius: widget.isPulse ? 25 : 10,
                   spreadRadius: widget.isPulse ? 2 : 0,
                   offset: const Offset(0, 4),

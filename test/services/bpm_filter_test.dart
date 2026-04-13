@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hilt_mobile/src/services/bpm_filter.dart';
+import 'package:hilt_mobile/src/services/signal_processor.dart';
 
 void main() {
   // ───────────────────────────────────────────────────────────────────────────
@@ -163,6 +164,25 @@ void main() {
       final buffered = List.filled(5, 70);
       expect(BpmFilter.isPlausibleReading(95, buffered), isTrue); // +25
       expect(BpmFilter.isPlausibleReading(45, buffered), isTrue); // -25
+    });
+  });
+
+  group('SignalProcessor.smoothBpmEstimates', () {
+    test('returns 0 for an empty estimate list', () {
+      expect(SignalProcessor.smoothBpmEstimates([]), 0);
+    });
+
+    test('stays close to the cluster when one estimate spikes', () {
+      final smoothed =
+          SignalProcessor.smoothBpmEstimates([72, 73, 72, 110, 73, 72]);
+      expect(smoothed, inInclusiveRange(72, 78));
+    });
+
+    test('still follows a genuine upward trend over time', () {
+      final smoothed =
+          SignalProcessor.smoothBpmEstimates([72, 74, 76, 78, 80, 82]);
+      expect(smoothed, greaterThan(76));
+      expect(smoothed, lessThan(82));
     });
   });
 }

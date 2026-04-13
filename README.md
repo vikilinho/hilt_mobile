@@ -10,7 +10,7 @@ Hilt King is a premier mobile workout companion designed for High-Intensity Inte
 *   **❤️ Live Heart Rate Integration**: Connects seamlessly with Bluetooth Low Energy (BLE) heart rate monitors and Wear OS devices.
 *   **📊 Interactive Match Reports**: Detailed post-workout analysis with interactive charts displaying heart rate trends.
 *   **🎧 Audio Coaching**: Motivational voice prompts and sound effects (whistles, chimes) to guide you through your session.
-*   **🎨 Premium UI**: A sleek, dark-themed user interface featuring the **Inter** font family for maximum readability and style.
+*   **🎨 Premium UI**: A sleek, light Material 3 interface with teal accents and the **Inter** font family.
 *   **🚀 Seamless Launch**: Branded native startup experience for instant access.
 
 ## Tech Stack

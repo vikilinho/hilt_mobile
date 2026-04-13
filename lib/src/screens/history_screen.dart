@@ -86,7 +86,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   )
@@ -240,7 +240,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               shape:
                   RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               elevation: 2,
-              shadowColor: Colors.black.withOpacity(0.05),
+              shadowColor: Colors.black.withValues(alpha: 0.05),
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Row(

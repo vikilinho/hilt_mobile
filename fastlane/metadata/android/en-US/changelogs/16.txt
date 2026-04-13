@@ -1,0 +1,11 @@
+### What's New in Version 1.0.6
+
+**Step History Reliability**
+- Fixed daily step history backfill so missed days are restored the next time you open the app.
+- Improved same-day step sync so opening later in the day shows the full total from midnight.
+
+**Workout Save Reliability**
+- Completed workouts now save immediately at session end, reducing the chance of losing a result before leaving the summary screen.
+
+**Health Sync Stability**
+- Improved startup timing for Health sync so daily step updates initialize more reliably after app launch.

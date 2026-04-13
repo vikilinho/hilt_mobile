@@ -1,0 +1,13 @@
+### What's New in Version 1.0.6
+
+**Heart Rate Measurement Improvements**
+- Improved camera-based heart rate detection with a stronger signal-processing pipeline.
+- Better smoothing across repeated BPM estimates for a steadier final reading.
+- Tuned finger-detection and scan timing per platform for more reliable scans.
+
+**Step History Reliability**
+- Fixed daily step history backfill so missed days are restored the next time you open the app.
+- Improved same-day step sync so opening later in the day shows the full total from midnight.
+
+**Workout Save Reliability**
+- Completed workouts now save immediately at session end, reducing the chance of losing a result before leaving the summary screen.

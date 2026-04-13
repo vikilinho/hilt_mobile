@@ -234,135 +234,139 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _handleNewSensorValue(int rawSensorTotal) async {
-    if (_userStats == null || _repo == null) return;
+    try {
+      if (_userStats == null || _repo == null) return;
 
-    final now = DateTime.now();
-    final lastReset = _userStats!.lastResetDate;
+      final now = DateTime.now();
+      final lastReset = _userStats!.lastResetDate;
 
-    if (lastReset != null) {
-      final nowDay = DateTime(now.year, now.month, now.day);
-      final lastDay = DateTime(lastReset.year, lastReset.month, lastReset.day);
+      if (lastReset != null) {
+        final nowDay = DateTime(now.year, now.month, now.day);
+        final lastDay =
+            DateTime(lastReset.year, lastReset.month, lastReset.day);
 
-      if (!nowDay.isAtSameMomentAs(lastDay)) {
+        if (!nowDay.isAtSameMomentAs(lastDay)) {
+          _userStats!.lastResetDate = now;
+          await _handleDayChange(lastDay, nowDay, now, rawSensorTotal);
+          _lastRawSensorTotal = rawSensorTotal;
+          return;
+        }
+      } else {
+        _currentSteps = 0;
+        _userStats!.dailySteps = 0;
         _userStats!.lastResetDate = now;
-        await _handleDayChange(lastDay, nowDay, now, rawSensorTotal);
+        _userStats!.startOfDaySteps = rawSensorTotal;
+        await _repo!.saveUserStats(_userStats!);
         _lastRawSensorTotal = rawSensorTotal;
+        _publish();
         return;
       }
-    } else {
-      _currentSteps = 0;
-      _userStats!.dailySteps = 0;
-      _userStats!.lastResetDate = now;
-      _userStats!.startOfDaySteps = rawSensorTotal;
-      await _repo!.saveUserStats(_userStats!);
+
+      if (_userStats!.startOfDaySteps == 0 && rawSensorTotal > 0) {
+        int newAnchor = rawSensorTotal - _userStats!.dailySteps;
+        if (newAnchor < 0) newAnchor = 0;
+        _userStats!.startOfDaySteps = newAnchor;
+        await _repo!.saveUserStats(_userStats!);
+      }
+
+      // --- GAIT VALIDATION LOGIC ---
+      int delta = rawSensorTotal - _lastRawSensorTotal;
       _lastRawSensorTotal = rawSensorTotal;
-      _publish();
-      return;
-    }
 
-    if (_userStats!.startOfDaySteps == 0 && rawSensorTotal > 0) {
-      int newAnchor = rawSensorTotal - _userStats!.dailySteps;
-      if (newAnchor < 0) newAnchor = 0;
-      _userStats!.startOfDaySteps = newAnchor;
-      await _repo!.saveUserStats(_userStats!);
-    }
-    
-    // --- GAIT VALIDATION LOGIC ---
-    int delta = rawSensorTotal - _lastRawSensorTotal;
-    _lastRawSensorTotal = rawSensorTotal;
+      if (delta <= 0) return;
 
-    if (delta <= 0) return;
+      bool dbNeedsUpdate = false;
 
-    bool dbNeedsUpdate = false;
+      if (delta > 5) {
+        // Bulk jump from deep sleep/background. Flush active buffers and commit.
+        _commitBufferedSteps();
+        dbNeedsUpdate = true;
+      } else {
+        for (int i = 0; i < delta; i++) {
+          bool isValid = _validateWithAccelerometer();
 
-    if (delta > 5) {
-      // Bulk jump from deep sleep/background. Flush active buffers and commit.
-      _commitBufferedSteps();
-      dbNeedsUpdate = true;
-    } else {
-      for (int i = 0; i < delta; i++) {
-        bool isValid = _validateWithAccelerometer();
-        
-        if (!isValid) {
-          _userStats!.startOfDaySteps++; // Ghost offset: Permanently hide invalid step
-          _isWalkingBurst = false;
-          _stepBuffer.clear();
-          dbNeedsUpdate = true;
-          continue;
-        }
-
-        if (_isWalkingBurst) {
-          if (now.difference(_lastValidStepTime).inSeconds > 3) {
-            // Burst expired: Go back to buffering
+          if (!isValid) {
+            _userStats!.startOfDaySteps++;
             _isWalkingBurst = false;
             _stepBuffer.clear();
-            _stepBuffer.add(now);
-            _userStats!.startOfDaySteps++; // Buffer it
             dbNeedsUpdate = true;
+            continue;
+          }
+
+          if (_isWalkingBurst) {
+            if (now.difference(_lastValidStepTime).inSeconds > 3) {
+              _isWalkingBurst = false;
+              _stepBuffer.clear();
+              _stepBuffer.add(now);
+              _userStats!.startOfDaySteps++;
+              dbNeedsUpdate = true;
+            }
           } else {
-            // Valid step in active burst. Allow UI increment bypass.
-          }
-        } else {
-          // Add to Buffer
-          _stepBuffer.add(now);
-          _userStats!.startOfDaySteps++; // Hide while buffering
-          dbNeedsUpdate = true;
+            _stepBuffer.add(now);
+            _userStats!.startOfDaySteps++;
+            dbNeedsUpdate = true;
 
-          final cutoff = now.subtract(const Duration(seconds: 12));
-          while (_stepBuffer.isNotEmpty && _stepBuffer.first.isBefore(cutoff)) {
-            _stepBuffer.removeFirst();
-          }
+            final cutoff = now.subtract(const Duration(seconds: 12));
+            while (_stepBuffer.isNotEmpty &&
+                _stepBuffer.first.isBefore(cutoff)) {
+              _stepBuffer.removeFirst();
+            }
 
-          if (_stepBuffer.length >= 8) {
-            // Burst Achieved: Graduate 8 steps!
-            _isWalkingBurst = true;
-            _userStats!.startOfDaySteps -= _stepBuffer.length;
-            _stepBuffer.clear();
+            if (_stepBuffer.length >= 8) {
+              _isWalkingBurst = true;
+              _userStats!.startOfDaySteps -= _stepBuffer.length;
+              _stepBuffer.clear();
+            }
           }
+          _lastValidStepTime = now;
         }
-        _lastValidStepTime = now;
       }
-    }
 
-    final offset = _userStats!.startOfDaySteps;
-    int displaySteps = rawSensorTotal - offset;
+      final offset = _userStats!.startOfDaySteps;
+      int displaySteps = rawSensorTotal - offset;
 
-    if (displaySteps < 0) {
-      _userStats!.startOfDaySteps = rawSensorTotal;
-      displaySteps = 0;
-      dbNeedsUpdate = true;
-    }
+      if (displaySteps < 0) {
+        _userStats!.startOfDaySteps = rawSensorTotal;
+        displaySteps = 0;
+        dbNeedsUpdate = true;
+      }
 
-    int stepDelta = 0;
-    if (displaySteps != _currentSteps) {
-      stepDelta = displaySteps - _currentSteps;
-      _currentSteps = displaySteps;
-      _userStats!.dailySteps = _currentSteps;
-      _userStats!.lastResetDate = now;
-      dbNeedsUpdate = true;
-      _publish();
-    }
+      int stepDelta = 0;
+      if (displaySteps != _currentSteps) {
+        stepDelta = displaySteps - _currentSteps;
+        _currentSteps = displaySteps;
+        _userStats!.dailySteps = _currentSteps;
+        _userStats!.lastResetDate = now;
+        dbNeedsUpdate = true;
+        _publish();
+      }
 
-    if (dbNeedsUpdate) {
-      await _repo!.saveUserStats(_userStats!);
-      if (stepDelta > 0 && _repo != null) {
-        final naturalId = int.parse("${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}");
-        final midnight = DateTime(now.year, now.month, now.day);
-        
-        await _repo!.isar.writeTxn(() async {
-           final existing = await _repo!.isar.dailyActivitys.get(naturalId);
-           final updatedSteps = (existing?.totalSteps ?? _currentSteps) + stepDelta;
-           
-           final activity = DailyActivity()
+      if (dbNeedsUpdate) {
+        await _repo!.saveUserStats(_userStats!);
+        if (stepDelta > 0 && _repo != null) {
+          final naturalId = int.parse(
+              "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}");
+          final midnight = DateTime(now.year, now.month, now.day);
+
+          await _repo!.isar.writeTxn(() async {
+            final existing = await _repo!.isar.dailyActivitys.get(naturalId);
+            final updatedSteps = (existing?.totalSteps ?? _currentSteps) +
+                stepDelta;
+
+            final activity = DailyActivity()
               ..id = naturalId
               ..date = midnight
               ..totalSteps = updatedSteps
-              ..miles = double.parse((updatedSteps * 0.00047).toStringAsFixed(1))
+              ..miles =
+                  double.parse((updatedSteps * 0.00047).toStringAsFixed(1))
               ..calories = (updatedSteps * 0.04).toInt();
-              
-           await _repo!.isar.dailyActivitys.put(activity);
-        });
+
+            await _repo!.isar.dailyActivitys.put(activity);
+          });
+        }
       }
+    } catch (e) {
+      debugPrint('[StepService] Step processing error: $e');
     }
   }
 

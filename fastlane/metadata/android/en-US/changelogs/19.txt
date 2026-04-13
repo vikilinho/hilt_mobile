@@ -1,0 +1,6 @@
+What's new in build 19:
+
+- Improved camera finger detection to better distinguish true fingertip coverage from uncovered camera frames
+- Added a clearer visual finger-detected indicator with a highlighted fingerprint graphic and check state
+- Kept the upgraded heart-rate signal processing and smoothing for more stable scan results
+- Continued step-history and workout-save reliability improvements from recent builds

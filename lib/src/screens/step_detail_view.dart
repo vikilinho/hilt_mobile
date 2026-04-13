@@ -67,7 +67,7 @@ class StepDetailView extends StatelessWidget {
                                 color: (isMatchReady
                                         ? const Color(0xFF00897B)
                                         : Colors.grey.shade800)
-                                    .withOpacity(0.15),
+                                    .withValues(alpha: 0.15),
                                 blurRadius: 40,
                                 spreadRadius: 10,
                               ),
@@ -171,7 +171,7 @@ class StepDetailView extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A), // Super dark grey, distinct from bg
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,7 +179,7 @@ class StepDetailView extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withValues(alpha: 0.3),
               shape: BoxShape.circle,
             ),
             child: Icon(

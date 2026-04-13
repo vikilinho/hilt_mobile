@@ -1,3 +1,4 @@
+import 'package:vector_math/vector_math_64.dart' show Matrix4, Vector3;
 import 'package:flutter/material.dart';
 import 'package:hilt_core/hilt_core.dart';
 
@@ -86,10 +87,10 @@ class EquipmentSelector extends StatelessWidget {
         width: 70,
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected ? hiltGreen.withOpacity(0.1) : Colors.transparent,
+          color: isSelected ? hiltGreen.withValues(alpha: 0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? hiltGreen : Colors.grey.withOpacity(0.3),
+            color: isSelected ? hiltGreen : Colors.grey.withValues(alpha: 0.3),
             width: isSelected ? 2 : 1,
           ),
         ),
@@ -99,7 +100,7 @@ class EquipmentSelector extends StatelessWidget {
             Transform(
               transform: Matrix4.identity()
                 ..rotateZ(rotateIcon ? 1.5708 : 0)
-                ..scale(1.0, scaleY),
+                ..scaleByVector3(Vector3(1.0, scaleY, 1.0)),
               alignment: Alignment.center,
               child: Icon(
                 icon,

@@ -12,19 +12,18 @@ import 'package:hilt_mobile/main.dart';
 
 void main() {
   testWidgets('App smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
     await tester.pumpWidget(const HiltMobileApp());
+    await tester.pump(const Duration(milliseconds: 250));
 
-    // Verify that the title is present
-    expect(find.text('HILT KING'), findsOneWidget);
-
-    // Verify that the navigation bar has Timer and History
-    expect(find.text('Timer'), findsOneWidget);
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Workouts'), findsOneWidget);
     expect(find.text('History'), findsOneWidget);
 
-    // Verify correct initial state (Timer icon selected - implicit check if needed,
-    // but just checking presence is good for smoke test)
-    expect(find.byIcon(Icons.timer), findsOneWidget);
+    expect(find.byIcon(Icons.home), findsOneWidget);
+    expect(find.byIcon(Icons.fitness_center), findsOneWidget);
     expect(find.byIcon(Icons.history), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 250));
   });
 }

@@ -1,0 +1,8 @@
+What's new in build 18:
+
+- Improved step history sync so missed days are backfilled when the app opens again
+- Strengthened workout save flow to reduce the chance of losing completed sessions
+- Upgraded camera heart-rate scanning with better signal processing and smoothing
+- Tuned finger detection and scan timing per platform for more reliable readings
+- Kept the screen awake during camera scans to prevent interruptions
+- Fixed release build compatibility issues with sharing and equipment selection

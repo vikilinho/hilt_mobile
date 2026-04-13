@@ -46,7 +46,7 @@ class HistoryItemCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05), // Subtle opacity
+              color: Colors.black.withValues(alpha: 0.05), // Subtle opacity
               blurRadius: 4, // 4px blur
               offset: const Offset(0, 2),
             ),

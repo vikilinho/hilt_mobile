@@ -12,15 +12,21 @@ class HealthSyncService {
   final StepService _stepService;
   WorkoutManager? _workoutManager;
   Isar? _isar;
+  bool _didInit = false;
 
   HealthSyncService(this._stepService);
 
   void updateDependencies(WorkoutManager manager) {
-    if (_workoutManager == null) {
-      _workoutManager = manager;
-      _isar = manager.repo?.isar; // wait, SessionRepository doesn't expose _isar, let's update it.
-      _init();
-    }
+    _workoutManager ??= manager;
+
+    final repo = manager.repo;
+    if (repo == null) return;
+
+    _isar = repo.isar;
+    if (_didInit) return;
+
+    _didInit = true;
+    _init();
   }
 
   Future<void> _init() async {
@@ -65,7 +71,7 @@ class HealthSyncService {
         final granted = await _health.requestAuthorization(types, permissions: perms);
         if (!granted) {
           // Permission denied: Use hardware sensor
-          _fallbackToHardwareSensor(naturalId, midnight);
+          await _fallbackToHardwareSensor(naturalId, midnight);
           return;
         }
       }
@@ -88,14 +94,14 @@ class HealthSyncService {
 
       if (totalSteps > 0) {
         // Sync Success: Insert/Update DailyActivity
-        _saveToIsar(naturalId, midnight, totalSteps);
+        await _saveToIsar(naturalId, midnight, totalSteps);
       } else {
         // Zero steps or no recordings yet today. Use fallback or write zeros.
-        _fallbackToHardwareSensor(naturalId, midnight);
+        await _fallbackToHardwareSensor(naturalId, midnight);
       }
     } catch (e) {
        debugPrint("[HealthSync] Error syncing steps: $e");
-       _fallbackToHardwareSensor(naturalId, midnight);
+       await _fallbackToHardwareSensor(naturalId, midnight);
     }
   }
 
@@ -112,9 +118,9 @@ class HealthSyncService {
     });
   }
 
-  void _fallbackToHardwareSensor(int id, DateTime midnight) {
+  Future<void> _fallbackToHardwareSensor(int id, DateTime midnight) async {
     // Read from existing step service
     final fallbackSteps = _stepService.dailySteps;
-    _saveToIsar(id, midnight, fallbackSteps);
+    await _saveToIsar(id, midnight, fallbackSteps);
   }
 }

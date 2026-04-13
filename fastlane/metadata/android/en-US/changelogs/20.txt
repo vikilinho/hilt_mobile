@@ -1,0 +1,6 @@
+What's new in build 20:
+
+- Stabilized finger detection during camera heart-rate scans to reduce mid-scan dropouts
+- Added automatic BPM lock-in once the scan reaches a stable result
+- Skips the post-workout camera scan when the session already has heart-rate data from the watch
+- Continued improvements to the visual finger-detected guidance during scanning

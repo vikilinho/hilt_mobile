@@ -79,7 +79,7 @@ class _HeartRatePulseState extends State<HeartRatePulse> {
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: pulseColor.withOpacity(0.3 * value),
+                color: pulseColor.withValues(alpha: 0.3 * value),
                 blurRadius: 20 * value,
                 spreadRadius: 5 * value,
               ),

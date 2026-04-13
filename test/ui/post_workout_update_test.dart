@@ -20,10 +20,11 @@ class _StubWorkoutManager extends ChangeNotifier implements WorkoutManager {
       );
 
   @override
-  Future<void> updatePeakBpm(int sessionId, int bpm) async {}
+  Future<void> updatePeakBpm(int sessionId, int bpm, {String? grade}) async {}
 
   @override
-  Future<void> saveSessionToDatabase(WorkoutSession session) async {}
+  Future<void> saveSessionToDatabase(WorkoutSession session,
+      {bool refresh = true}) async {}
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

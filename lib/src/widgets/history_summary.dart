@@ -28,7 +28,7 @@ class HistorySummary extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.all(16),
       elevation: 4, // Increased elevation
-      shadowColor: Colors.black.withOpacity(0.2),
+      shadowColor: Colors.black.withValues(alpha: 0.2),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(24.0), // Increased padding
