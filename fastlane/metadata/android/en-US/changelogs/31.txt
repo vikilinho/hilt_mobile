@@ -1,0 +1,3 @@
+Improved camera heart-rate acquisition for firm fingertip contact on the camera and flash
+Refined exposure lock timing and signal stability handling for more reliable BPM capture
+Expanded scanner validation with saturation, acquisition-state, and waveform stability test coverage

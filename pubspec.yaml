@@ -1,7 +1,7 @@
 name: hilt_mobile
 description: Companion app for Hilt Watch.
 publish_to: 'none'
-version: 1.0.7+28
+version: 1.0.8+34
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -13,6 +13,8 @@ dependencies:
     path: ../hilt_core
   isar: ^3.1.0
   camera: ^0.10.6
+  # CameraX replaces Camera2 on Android — fixes flash/stream race on older HALs.
+  camera_android_camerax: ^0.6.3
   fl_chart: ^0.65.0
   provider: ^6.0.0
   intl: ^0.18.0
@@ -35,7 +37,6 @@ dependencies:
   health: ^13.3.1
   sensors_plus: ^7.0.0
   heart_bpm: ^2.0.0+0
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

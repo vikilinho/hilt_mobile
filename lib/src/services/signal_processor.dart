@@ -44,8 +44,21 @@ class SignalProcessor {
     return output;
   }
 
-  static List<int> detectPeaks(List<double> signal) {
+  /// Detects positive peaks in [signal].
+  ///
+  /// [sampleRateHz] is used to enforce a physiological minimum inter-peak
+  /// distance: no two heartbeats can be closer than 60 / 220 BPM ≈ 0.27 s.
+  /// Passing the actual sample rate prevents spurious double-detections that
+  /// previously occurred when [sampleRateHz] was high (≥ 60 fps) but the
+  /// hard-coded minimum distance of 5 samples was kept unchanged.
+  static List<int> detectPeaks(
+    List<double> signal, {
+    double sampleRateHz = 30.0,
+  }) {
     if (signal.length < 5) return [];
+    // 220 BPM is the physiological ceiling → minimum interval = 60/220 s.
+    final minDist = (sampleRateHz * 60 / 220).ceil().clamp(3, 60);
+
     final peaks = <int>[];
     final mean = signal.reduce((a, b) => a + b) / signal.length;
     final variance = signal
@@ -62,7 +75,7 @@ class SignalProcessor {
           value > signal[i - 2] &&
           value > signal[i + 1] &&
           value > signal[i + 2]) {
-        if (peaks.isEmpty || (i - peaks.last) > 5) {
+        if (peaks.isEmpty || (i - peaks.last) >= minDist) {
           peaks.add(i);
         }
       }
@@ -95,35 +108,30 @@ class SignalProcessor {
     if (n < 32 || sampleRateHz <= 0) return null;
 
     final fftSize = _nextPow2(n);
-    final padded = List<double>.filled(fftSize, 0.0);
+
+    // Apply Hann window and zero-pad into complex arrays.
+    final re = List<double>.filled(fftSize, 0.0);
+    final im = List<double>.filled(fftSize, 0.0);
+    final windowDenom = fftSize > 1 ? fftSize - 1 : 1;
     for (int i = 0; i < n; i++) {
-      padded[i] = signal[i];
+      final w = 0.5 * (1 - cos(2 * pi * i / windowDenom));
+      re[i] = signal[i] * w;
     }
 
-    final windowed = List<double>.generate(fftSize, (i) {
-      final window = 0.5 * (1 - cos(2 * pi * i / (fftSize - 1)));
-      return padded[i] * window;
-    });
+    // O(N log N) Cooley-Tukey radix-2 in-place FFT.
+    _fftInPlace(re, im, fftSize);
 
-    double maxMagnitude = 0;
+    // Find the bin with peak power inside the cardiac band.
+    double maxPower = 0;
     double dominantFreq = 0;
     final halfN = fftSize ~/ 2;
 
     for (int k = 1; k < halfN; k++) {
       final frequency = k * sampleRateHz / fftSize;
       if (frequency < lowCutHz || frequency > highCutHz) continue;
-
-      double real = 0;
-      double imag = 0;
-      for (int i = 0; i < fftSize; i++) {
-        final angle = 2 * pi * k * i / fftSize;
-        real += windowed[i] * cos(angle);
-        imag -= windowed[i] * sin(angle);
-      }
-
-      final magnitude = sqrt(real * real + imag * imag);
-      if (magnitude > maxMagnitude) {
-        maxMagnitude = magnitude;
+      final power = re[k] * re[k] + im[k] * im[k];
+      if (power > maxPower) {
+        maxPower = power;
         dominantFreq = frequency;
       }
     }
@@ -131,6 +139,51 @@ class SignalProcessor {
     if (dominantFreq == 0) return null;
     final bpm = dominantFreq * 60;
     return (bpm >= 40 && bpm <= 220) ? bpm : null;
+  }
+
+  /// Cooley-Tukey radix-2 DIT FFT (in-place).
+  ///
+  /// [re] and [im] must both have length equal to a power of two.
+  /// On return they contain the complex DFT output.
+  static void _fftInPlace(List<double> re, List<double> im, int n) {
+    // Bit-reversal permutation.
+    for (int i = 1, j = 0; i < n; i++) {
+      int bit = n >> 1;
+      for (; (j & bit) != 0; bit >>= 1) {
+        j ^= bit;
+      }
+      j ^= bit;
+      if (i < j) {
+        var t = re[i]; re[i] = re[j]; re[j] = t;
+        t = im[i]; im[i] = im[j]; im[j] = t;
+      }
+    }
+
+    // Butterfly stages — twiddle factors computed once per stage length,
+    // then rotated incrementally, avoiding cos/sin inside the inner loop.
+    for (int len = 2; len <= n; len <<= 1) {
+      final half = len >> 1;
+      final baseRe = cos(-2 * pi / len);
+      final baseIm = sin(-2 * pi / len);
+      for (int i = 0; i < n; i += len) {
+        double wRe = 1.0;
+        double wIm = 0.0;
+        for (int k = 0; k < half; k++) {
+          final uRe = re[i + k];
+          final uIm = im[i + k];
+          final vRe = re[i + k + half] * wRe - im[i + k + half] * wIm;
+          final vIm = re[i + k + half] * wIm + im[i + k + half] * wRe;
+          re[i + k] = uRe + vRe;
+          im[i + k] = uIm + vIm;
+          re[i + k + half] = uRe - vRe;
+          im[i + k + half] = uIm - vIm;
+          // Rotate the twiddle factor — no trig in the inner loop.
+          final newWRe = wRe * baseRe - wIm * baseIm;
+          wIm = wRe * baseIm + wIm * baseRe;
+          wRe = newWRe;
+        }
+      }
+    }
   }
 
   static List<double> normalise(List<double> signal) {

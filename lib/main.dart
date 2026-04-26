@@ -65,6 +65,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        final manager = context.read<WorkoutManager>();
+        manager.ensureStepHistoryRebuild().then((_) {
+          if (!mounted) return;
+          manager.syncStepHistory();
+          context.read<HealthSyncService>().fetchDailySteps();
+        });
+      });
+    });
   }
 
   @override

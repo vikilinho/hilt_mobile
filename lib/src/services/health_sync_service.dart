@@ -5,6 +5,8 @@ import 'package:hilt_core/hilt_core.dart';
 import 'package:intl/intl.dart';
 import 'package:isar/isar.dart';
 import 'step_service.dart';
+import 'health_authorization.dart';
+import 'health_step_totals.dart';
 import '../workout_manager.dart'; // To access the repository
 
 class HealthSyncService {
@@ -13,6 +15,7 @@ class HealthSyncService {
   WorkoutManager? _workoutManager;
   Isar? _isar;
   bool _didInit = false;
+  bool _isFetching = false;
 
   HealthSyncService(this._stepService);
 
@@ -47,50 +50,32 @@ class HealthSyncService {
 
   Future<void> fetchDailySteps() async {
     if (_isar == null) return;
-    
+    if (_isFetching) return;
+
+    _isFetching = true;
     final now = DateTime.now();
     final midnight = DateTime(now.year, now.month, now.day);
-    
-    // Natural ID format: yyyyMMdd
     final naturalId = generateDailyId(midnight);
+    
+    try {
+      // ZERO-STATE INITIALIZATION:
+      // Ensure an anchor exists for today before processing deltas to prevent ghost steps.
+      final existing = await _isar!.dailyActivitys.get(naturalId);
+      if (existing == null) {
+        await _saveToIsar(naturalId, midnight, 0);
+      }
 
-    // ZERO-STATE INITIALIZATION:
-    // Ensure an anchor exists for today before processing deltas to prevent ghost steps.
-    final existing = await _isar!.dailyActivitys.get(naturalId);
-    if (existing == null) {
-      await _saveToIsar(naturalId, midnight, 0);
-    }
-
-    final types = [HealthDataType.STEPS];
-    final perms = [HealthDataAccess.READ];
-
-    bool? hasPermissions = true;
-    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
-      hasPermissions = await _health.hasPermissions(types, permissions: perms);
-      if (hasPermissions != true) {
-        final granted = await _health.requestAuthorization(types, permissions: perms);
+      if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+        final granted = await HealthAuthorization.ensureStepReadAccess(_health);
         if (!granted) {
           // Permission denied: Use hardware sensor
           await _fallbackToHardwareSensor(naturalId, midnight);
           return;
         }
       }
-    }
 
-    try {
-      // EXPLICIT HISTORICAL RANGE: Start of day -> Now
-      final healthData = await _health.getHealthDataFromTypes(
-        startTime: midnight,
-        endTime: now,
-        types: types,
-      );
-
-      int totalSteps = 0;
-      for (var data in healthData) {
-        if (data.value is NumericHealthValue) {
-          totalSteps += (data.value as NumericHealthValue).numericValue.toInt();
-        }
-      }
+      final totalSteps =
+          await HealthStepTotals.getTotalForRange(_health, midnight, now);
 
       if (totalSteps > 0) {
         // Sync Success: Insert/Update DailyActivity
@@ -102,6 +87,8 @@ class HealthSyncService {
     } catch (e) {
        debugPrint("[HealthSync] Error syncing steps: $e");
        await _fallbackToHardwareSensor(naturalId, midnight);
+    } finally {
+      _isFetching = false;
     }
   }
 

@@ -1,0 +1,3 @@
+Improved heart-rate scanning on modern phones by aligning capture to the rear lens closest to the flash
+Added a camera-bar placement guide with an active lens highlight and low-light fallback warning
+Refined camera PPG acquisition and validation for more reliable Match Report BPM capture

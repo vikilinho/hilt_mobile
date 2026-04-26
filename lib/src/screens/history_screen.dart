@@ -211,9 +211,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       itemBuilder: (context, index) {
         final entry = sessions[index];
         final steps = entry.steps ?? 0;
+        final isMatchReady = steps >= 10000;
 
         return Dismissible(
-          key: ValueKey('walk_\${entry.id}'),
+          key: ValueKey('walk_${entry.id}'),
           direction: DismissDirection.endToStart,
           onDismissed: (_) => manager.deleteSession(entry.id),
           background: Container(
@@ -257,7 +258,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               .titleMedium
                               ?.copyWith(
                                 fontWeight: FontWeight.bold,
-                                color: Colors.black87,
+                                color: isMatchReady
+                                    ? const Color(0xFF00897B)
+                                    : Colors.black87,
                               ),
                         ),
                         const SizedBox(height: 4),
@@ -284,7 +287,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             .headlineSmall
                             ?.copyWith(
                               fontWeight: FontWeight.w900,
-                              color: Colors.black87,
+                              color: isMatchReady
+                                  ? const Color(0xFF00897B)
+                                  : Colors.black87,
                             ),
                       ),
                       Text(

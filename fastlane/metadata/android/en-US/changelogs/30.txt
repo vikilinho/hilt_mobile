@@ -1,0 +1,3 @@
+Improved PPG saturation handling for direct fingertip contact on the camera and flash
+Refined heart-rate signal acquisition so stable contact is detected more reliably before BPM lock-in
+Updated the post-workout scanner flow while keeping the existing Hilt match-report experience

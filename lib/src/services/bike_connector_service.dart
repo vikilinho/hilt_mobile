@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_ftms/flutter_ftms.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -45,7 +46,7 @@ class BikeConnectorService {
         }
       });
     } catch (e) {
-      print("FlutterBluePlus init error: $e");
+      debugPrint("FlutterBluePlus init error: $e");
     }
   }
 
@@ -96,7 +97,7 @@ class BikeConnectorService {
               await connect(device);
               if (!completer.isCompleted) completer.complete();
             } catch (e) {
-              print("Connect error in callback: $e");
+              debugPrint("Connect error in callback: $e");
               // If connection fails, we might want to resume scan?
               // For now, just fail.
               if (!completer.isCompleted) completer.completeError(e);
@@ -116,13 +117,13 @@ class BikeConnectorService {
       ]);
 
       if (!found) {
-        await scanSubscription?.cancel();
+        await scanSubscription.cancel();
         if (_status != BikeConnectionStatus.connected) {
           _updateStatus(BikeConnectionStatus.disconnected);
         }
       }
     } catch (e) {
-      print("Scan Error: $e");
+      debugPrint("Scan Error: $e");
       await scanSubscription?.cancel();
       _updateStatus(BikeConnectionStatus.disconnected);
     }
@@ -143,7 +144,7 @@ class BikeConnectorService {
         }
       });
     } catch (e) {
-      print("Connection Error: $e");
+      debugPrint("Connection Error: $e");
       _updateStatus(BikeConnectionStatus.disconnected);
     }
   }
