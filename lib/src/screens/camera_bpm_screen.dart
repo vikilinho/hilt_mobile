@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:heart_bpm/heart_bpm.dart';
+import 'package:heart_bpm/heart_bpm.dart' show SensorValue;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -53,20 +55,24 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   static const _hiltTeal = Color(0xFF00897B);
   static const _surfaceTint = Color(0xFFF4F7F6);
   static const _cardTint = Color(0xFFEAF4F2);
-  static const _lockInDurationSeconds = 30;
+  static const _lockInHoldDuration = Duration(seconds: 2);
   static const _coverageWindowSize = 10;
   static const _coverageMinBrightness = 15.0;
   static const _coverageMaxBrightness = 90.0;
-  static const _coverageStartThreshold = 0.72;
-  static const _coverageStopThreshold = 0.58;
+  static const _fingerAcquireCoverageThreshold = 0.75;
+  static const _fingerReleaseCoverageThreshold = 0.55;
+  static const _coverageStabilityTolerance = 0.12;
+  static const _displayCoverageThreshold = 0.90;
 
   bool _cameraPermissionGranted = false;
   final List<int> _readings = [];
   final List<double> _brightnessSamples = [];
+  final List<double> _coverageSamples = [];
   int _currentMedian = 0;
   bool _fingerDetected = false;
   double _coverageScore = 0.0;
   double _averageBrightness = 0.0;
+  int _warmupReadingsRemaining = BpmFilter.warmupReadings;
   
   Stopwatch? _lockInCountdown;
   Timer? _uiTimer;
@@ -89,7 +95,8 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     _uiTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
       if (_lockInCountdown != null &&
-          _lockInCountdown!.elapsed.inSeconds >= _lockInDurationSeconds &&
+          _lockInCountdown!.elapsedMilliseconds >=
+              _lockInHoldDuration.inMilliseconds &&
           _currentMedian > 0) {
         _lockIn();
       } else {
@@ -118,28 +125,52 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     }
   }
 
+  int _latestStableMedian() {
+    if (_readings.isEmpty) return 0;
+    if (_readings.length < BpmFilter.stabilityWindow) {
+      return BpmFilter.medianOf(_readings);
+    }
+    final recent = _readings.sublist(
+      _readings.length - BpmFilter.stabilityWindow,
+    );
+    return BpmFilter.medianOf(recent);
+  }
+
   void _onBPM(int bpm) {
     if (!mounted) return;
-    setState(() {
-      if (bpm >= 40 && bpm <= 220) {
-        if (_readings.length < BpmFilter.bufferTarget) {
-          _readings.add(bpm);
-        } else {
-          _readings.removeAt(0);
-          _readings.add(bpm);
-        }
-        
-        final sorted = List<int>.from(_readings)..sort();
-        if (sorted.isNotEmpty) {
-          _currentMedian = sorted[sorted.length ~/ 2];
-        }
 
-        if (BpmFilter.canLock(_readings)) {
-          _lockInCountdown ??= Stopwatch()..start();
-        } else {
-          _lockInCountdown?.stop();
-          _lockInCountdown = null;
-        }
+    if (!_fingerDetected) return;
+    if (_coverageScore < _displayCoverageThreshold) return;
+    if (bpm < 40 || bpm > 220) return;
+
+    setState(() {
+      if (_warmupReadingsRemaining > 0) {
+        _warmupReadingsRemaining--;
+        _lockInCountdown?.stop();
+        _lockInCountdown = null;
+        return;
+      }
+
+      if (!BpmFilter.isPlausibleReading(bpm, _readings)) {
+        _lockInCountdown?.stop();
+        _lockInCountdown = null;
+        return;
+      }
+
+      if (_readings.length < BpmFilter.bufferTarget) {
+        _readings.add(bpm);
+      } else {
+        _readings.removeAt(0);
+        _readings.add(bpm);
+      }
+
+      _currentMedian = _latestStableMedian();
+
+      if (_canLock) {
+        _lockInCountdown ??= Stopwatch()..start();
+      } else {
+        _lockInCountdown?.stop();
+        _lockInCountdown = null;
       }
     });
   }
@@ -161,10 +192,13 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
                 (_coverageMaxBrightness - _coverageMinBrightness))
             .clamp(0.0, 1.0);
     final normalizedScore = (1.0 - normalizedBrightness).clamp(0.0, 1.0);
+    _coverageSamples.add(normalizedScore);
+    if (_coverageSamples.length > _coverageWindowSize) {
+      _coverageSamples.removeAt(0);
+    }
     final nextFingerDetected = _fingerDetected
-        ? normalizedScore >= _coverageStopThreshold
-        : normalizedScore >= _coverageStartThreshold;
-
+        ? normalizedScore >= _fingerReleaseCoverageThreshold
+        : normalizedScore >= _fingerAcquireCoverageThreshold;
     setState(() {
       _coverageScore = normalizedScore;
       _averageBrightness = averageBrightness;
@@ -172,6 +206,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       if (!_fingerDetected) {
         _readings.clear();
         _currentMedian = 0;
+        _warmupReadingsRemaining = BpmFilter.warmupReadings;
         _lockInCountdown?.stop();
         _lockInCountdown = null;
       }
@@ -193,12 +228,37 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     Navigator.of(context).pop(_currentMedian);
   }
 
-  bool get _canLock => BpmFilter.canLock(_readings) && _currentMedian > 0;
+  bool get _coverageStable {
+    if (_coverageSamples.length < _coverageWindowSize) return false;
+    final minCoverage = _coverageSamples.reduce((a, b) => a < b ? a : b);
+    final maxCoverage = _coverageSamples.reduce((a, b) => a > b ? a : b);
+    return (maxCoverage - minCoverage) <= _coverageStabilityTolerance;
+  }
+
+  bool get _coverageReady =>
+      _fingerDetected && _coverageScore >= _displayCoverageThreshold;
+
+  bool get _bpmStable =>
+      _currentMedian > 0 && BpmFilter.canLock(_readings);
+
+  bool get _canLock => _coverageReady && _coverageStable && _bpmStable;
+
+  String get _lockQualityLabel {
+    if (!_fingerDetected) return 'Waiting for finger';
+    if (_coverageScore < _displayCoverageThreshold) {
+      return 'Cover lens more fully';
+    }
+    if (!_coverageStable) return 'Hold finger steadier';
+    if (!_bpmStable) return 'Collecting pulse';
+    return 'Ready to lock';
+  }
 
   double get _progress {
     if (widget.previewMode) return 0.5;
     if (!_canLock || _lockInCountdown == null) return 0.0;
-    return (_lockInCountdown!.elapsedMilliseconds / (_lockInDurationSeconds * 1000)).clamp(0.0, 1.0);
+    return (_lockInCountdown!.elapsedMilliseconds /
+            _lockInHoldDuration.inMilliseconds)
+        .clamp(0.0, 1.0);
   }
 
   @override
@@ -255,8 +315,10 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   }
 
   Widget _buildBpmReadout() {
-    final displayedBpm = widget.previewMode ? (widget.previewBpm ?? 0) : _currentMedian;
-    final bpmText = displayedBpm > 0 ? displayedBpm.toString().padLeft(2, '0') : '--';
+    final displayedBpm = widget.previewMode
+        ? (widget.previewBpm ?? 0)
+        : (_coverageScore >= _displayCoverageThreshold ? _currentMedian : 0);
+    final bpmText = displayedBpm.toString().padLeft(2, '0');
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -316,8 +378,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
               fit: StackFit.expand,
               children: [
                 if (!widget.previewMode && !widget.grantCameraForTesting)
-                  HeartBPMDialog(
-                    context: context,
+                  _HeartBpmCameraView(
                     showTextValues: false,
                     cameraWidgetWidth: size - 32,
                     cameraWidgetHeight: size - 32,
@@ -407,6 +468,22 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
                 'Coverage ${(100 * _coverageScore).round()}%  Brightness ${_averageBrightness.toStringAsFixed(0)}',
                 style: TextStyle(
                   color: _fingerDetected ? _hiltTeal : Colors.black54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Lock quality: $_lockQualityLabel',
+                style: TextStyle(
+                  color: _canLock ? _hiltTeal : Colors.black54,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
@@ -553,6 +630,212 @@ class _ScanAnimationOverlayState extends State<_ScanAnimationOverlay>
       builder: (_, __) => CustomPaint(
         painter: _FingerprintScanPainter(progress: _controller.value),
       ),
+    );
+  }
+}
+
+class _HeartBpmCameraView extends StatefulWidget {
+  const _HeartBpmCameraView({
+    required this.onBPM,
+    required this.onRawData,
+    this.centerLoadingWidget,
+    this.cameraWidgetHeight,
+    this.cameraWidgetWidth,
+    this.showTextValues = false,
+    this.borderRadius,
+    this.sampleDelay = 2000 ~/ 30,
+    this.alpha = 0.8,
+  });
+
+  final Widget? centerLoadingWidget;
+  final double? cameraWidgetHeight;
+  final double? cameraWidgetWidth;
+  final bool showTextValues;
+  final double? borderRadius;
+  final void Function(int) onBPM;
+  final void Function(SensorValue)? onRawData;
+  final int sampleDelay;
+  final double alpha;
+
+  @override
+  State<_HeartBpmCameraView> createState() => _HeartBpmCameraViewState();
+}
+
+class _HeartBpmCameraViewState extends State<_HeartBpmCameraView> {
+  static const _windowLength = 50;
+
+  CameraController? _controller;
+  bool _processing = false;
+  bool _isCameraInitialized = false;
+  int _currentValue = 0;
+  final List<SensorValue> _measureWindow = List<SensorValue>.filled(
+    _windowLength,
+    SensorValue(time: DateTime.now(), value: 0),
+    growable: true,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_initController());
+  }
+
+  @override
+  void dispose() {
+    unawaited(_deinitController());
+    super.dispose();
+  }
+
+  Future<void> _deinitController() async {
+    _isCameraInitialized = false;
+    final controller = _controller;
+    _controller = null;
+    if (controller == null) return;
+    await controller.dispose();
+  }
+
+  Future<void> _initController() async {
+    if (_controller != null) return;
+
+    final cameras = await availableCameras();
+    if (cameras.isEmpty) return;
+
+    final backCamera = cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.back,
+      orElse: () => cameras.first,
+    );
+
+    final controller = CameraController(
+      backCamera,
+      ResolutionPreset.low,
+      enableAudio: false,
+      imageFormatGroup:
+          Platform.isIOS ? ImageFormatGroup.bgra8888 : ImageFormatGroup.yuv420,
+    );
+
+    try {
+      await controller.initialize();
+      try {
+        await controller.setFlashMode(FlashMode.torch);
+      } catch (_) {}
+      try {
+        await controller.setExposureMode(ExposureMode.locked);
+      } catch (_) {}
+      try {
+        await controller.setFocusMode(FocusMode.locked);
+      } catch (_) {}
+
+      await controller.startImageStream((image) {
+        if (_processing || !mounted) return;
+        _processing = true;
+        _scanImage(image);
+      });
+
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _controller = controller;
+        _isCameraInitialized = true;
+      });
+    } catch (_) {
+      await controller.dispose();
+      rethrow;
+    }
+  }
+
+  void _scanImage(CameraImage image) {
+    final average =
+        image.planes.first.bytes.reduce((a, b) => a + b) /
+        image.planes.first.bytes.length;
+
+    _measureWindow.removeAt(0);
+    _measureWindow.add(SensorValue(time: DateTime.now(), value: average));
+
+    _smoothBpm(average).then((_) {
+      widget.onRawData?.call(
+        SensorValue(time: DateTime.now(), value: average),
+      );
+
+      Future<void>.delayed(Duration(milliseconds: widget.sampleDelay)).then((_) {
+        if (!mounted) return;
+        setState(() {
+          _processing = false;
+        });
+      });
+    });
+  }
+
+  Future<int> _smoothBpm(double newValue) async {
+    double maxVal = 0;
+    double avg = 0;
+
+    for (final sample in _measureWindow) {
+      avg += sample.value / _measureWindow.length;
+      if (sample.value.toDouble() > maxVal) {
+        maxVal = sample.value.toDouble();
+      }
+    }
+
+    final threshold = (maxVal + avg) / 2;
+    int counter = 0;
+    int previousTimestamp = 0;
+    double tempBpm = 0;
+
+    for (int i = 1; i < _measureWindow.length; i++) {
+      if (_measureWindow[i - 1].value < threshold &&
+          _measureWindow[i].value > threshold) {
+        if (previousTimestamp != 0) {
+          counter++;
+          tempBpm += 60000 /
+              (_measureWindow[i].time.millisecondsSinceEpoch -
+                  previousTimestamp);
+        }
+        previousTimestamp = _measureWindow[i].time.millisecondsSinceEpoch;
+      }
+    }
+
+    if (counter > 0) {
+      tempBpm /= counter;
+      tempBpm = (1 - widget.alpha) * _currentValue + widget.alpha * tempBpm;
+      if (mounted) {
+        setState(() {
+          _currentValue = tempBpm.toInt();
+        });
+      } else {
+        _currentValue = tempBpm.toInt();
+      }
+      widget.onBPM(_currentValue);
+    }
+
+    return _currentValue;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isCameraInitialized || _controller == null) {
+      return Center(
+        child: widget.centerLoadingWidget ??
+            const CircularProgressIndicator(color: _CameraBpmScreenState._hiltTeal),
+      );
+    }
+
+    return Column(
+      children: [
+        Container(
+          constraints: BoxConstraints.tightFor(
+            width: widget.cameraWidgetWidth ?? 100,
+            height: widget.cameraWidgetHeight ?? 130,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(widget.borderRadius ?? 10),
+            child: _controller!.buildPreview(),
+          ),
+        ),
+        if (widget.showTextValues) Text(_currentValue.toString()),
+      ],
     );
   }
 }

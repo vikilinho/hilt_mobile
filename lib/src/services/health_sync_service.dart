@@ -10,6 +10,12 @@ import 'health_step_totals.dart';
 import '../workout_manager.dart'; // To access the repository
 
 class HealthSyncService {
+  static const List<String> _preferredStepSources = [
+    'com.android.healthconnect.phone.j4498dfd09a793f5186ff99d814cf5f18',
+    'com.google.android.apps.fitness',
+    'com.fitbit.FitbitMobile',
+  ];
+
   final Health _health = Health();
   final StepService _stepService;
   WorkoutManager? _workoutManager;
@@ -68,27 +74,90 @@ class HealthSyncService {
       if (!Platform.environment.containsKey('FLUTTER_TEST')) {
         final granted = await HealthAuthorization.ensureStepReadAccess(_health);
         if (!granted) {
+          _stepService.clearExternalDailyStepsPreference();
           // Permission denied: Use hardware sensor
           await _fallbackToHardwareSensor(naturalId, midnight);
           return;
         }
       }
 
-      final totalSteps =
+      final sourceSelection =
+          await _selectPreferredStepTotal(midnight, now);
+      final totalSteps = sourceSelection?.steps ??
           await HealthStepTotals.getTotalForRange(_health, midnight, now);
 
       if (totalSteps > 0) {
         // Sync Success: Insert/Update DailyActivity
+        await _stepService.setExternalDailySteps(totalSteps);
         await _saveToIsar(naturalId, midnight, totalSteps);
       } else {
+        _stepService.clearExternalDailyStepsPreference();
         // Zero steps or no recordings yet today. Use fallback or write zeros.
         await _fallbackToHardwareSensor(naturalId, midnight);
       }
     } catch (e) {
        debugPrint("[HealthSync] Error syncing steps: $e");
+       _stepService.clearExternalDailyStepsPreference();
        await _fallbackToHardwareSensor(naturalId, midnight);
     } finally {
       _isFetching = false;
+    }
+  }
+
+  Future<_SelectedStepTotal?> _selectPreferredStepTotal(
+    DateTime start,
+    DateTime end,
+  ) async {
+    try {
+      final points = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.STEPS],
+        startTime: start,
+        endTime: end,
+        recordingMethodsToFilter: const [RecordingMethod.manual],
+      );
+
+      if (points.isEmpty) {
+        debugPrint('[HealthSync] No raw Health Connect step points found for source breakdown.');
+        return null;
+      }
+
+      final sourceTotals = <String, num>{};
+      final methodTotals = <String, num>{};
+
+      for (final point in points) {
+        final value = point.value;
+        if (value is! NumericHealthValue) continue;
+
+        final numeric = value.numericValue;
+        final sourceKey = point.sourceName.isNotEmpty ? point.sourceName : point.sourceId;
+        sourceTotals[sourceKey] = (sourceTotals[sourceKey] ?? 0) + numeric;
+
+        final methodKey = point.recordingMethod.name;
+        methodTotals[methodKey] = (methodTotals[methodKey] ?? 0) + numeric;
+      }
+
+      final sourceSummary = sourceTotals.entries
+          .map((entry) => '${entry.key}: ${entry.value.round()}')
+          .join(', ');
+      final methodSummary = methodTotals.entries
+          .map((entry) => '${entry.key}: ${entry.value.round()}')
+          .join(', ');
+
+      debugPrint('[HealthSync] Step source breakdown: $sourceSummary');
+      debugPrint('[HealthSync] Step recording methods: $methodSummary');
+
+      for (final source in _preferredStepSources) {
+        final total = sourceTotals[source];
+        if (total != null && total > 0) {
+          debugPrint('[HealthSync] Selected preferred step source: $source (${total.round()} steps)');
+          return _SelectedStepTotal(source: source, steps: total.round());
+        }
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint('[HealthSync] Unable to log Health Connect step sources: $e');
+      return null;
     }
   }
 
@@ -110,4 +179,14 @@ class HealthSyncService {
     final fallbackSteps = _stepService.dailySteps;
     await _saveToIsar(id, midnight, fallbackSteps);
   }
+}
+
+class _SelectedStepTotal {
+  const _SelectedStepTotal({
+    required this.source,
+    required this.steps,
+  });
+
+  final String source;
+  final int steps;
 }

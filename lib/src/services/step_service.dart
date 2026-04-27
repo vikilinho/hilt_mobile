@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter/foundation.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import '../workout_manager.dart';
@@ -27,6 +26,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
   int _currentSteps = 0;
   int get dailySteps => _currentSteps;
+  bool _preferExternalStepTotal = false;
   
   @visibleForTesting
   set dailySteps(int steps) => _currentSteps = steps;
@@ -35,6 +35,23 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
   WorkoutManager? _workoutManager;
   int _lastRawSensorTotal = 0;
+
+  Future<void> setExternalDailySteps(int steps) async {
+    _preferExternalStepTotal = true;
+    if (_currentSteps == steps) return;
+
+    _currentSteps = steps;
+    if (_userStats != null && _repo != null) {
+      _userStats!.dailySteps = steps;
+      _userStats!.lastResetDate ??= DateTime.now();
+      await _repo!.saveUserStats(_userStats!);
+    }
+    _publish();
+  }
+
+  void clearExternalDailyStepsPreference() {
+    _preferExternalStepTotal = false;
+  }
 
   // ---------------------------------------------------------------------------
   // Gait Validation State
@@ -332,7 +349,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       int stepDelta = 0;
-      if (displaySteps != _currentSteps) {
+      if (!_preferExternalStepTotal && displaySteps != _currentSteps) {
         stepDelta = displaySteps - _currentSteps;
         _currentSteps = displaySteps;
         _userStats!.dailySteps = _currentSteps;
@@ -343,7 +360,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
       if (dbNeedsUpdate) {
         await _repo!.saveUserStats(_userStats!);
-        if (stepDelta > 0 && _repo != null) {
+        if (!_preferExternalStepTotal && stepDelta > 0 && _repo != null) {
           final naturalId = int.parse(
               "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}");
           final midnight = DateTime(now.year, now.month, now.day);
