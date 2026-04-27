@@ -1,12 +1,67 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:heart_bpm/heart_bpm.dart' show SensorValue;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../services/bpm_filter.dart';
+import '../services/signal_processor.dart';
+
+Map<String, dynamic>? _estimateHeartRateFromSamples(
+  Map<String, dynamic> payload,
+) {
+  final buffer = (payload['buffer'] as List).cast<double>();
+  final timestampsUs = (payload['timestampsUs'] as List).cast<int>();
+  if (buffer.length < 32 || timestampsUs.length < 32) return null;
+
+  final elapsedUs = timestampsUs.last - timestampsUs.first;
+  if (elapsedUs <= 0) return null;
+
+  final sampleRateHz = ((buffer.length - 1) * 1000000.0) / elapsedUs;
+  if (sampleRateHz <= 0) return null;
+
+  final normalized = SignalProcessor.normalise(buffer);
+  final filtered = SignalProcessor.bandpassFilter(normalized, sampleRateHz);
+  final bpmFft = SignalProcessor.calculateBpmFromFft(filtered, sampleRateHz);
+  final peaks = SignalProcessor.detectPeaks(
+    filtered,
+    sampleRateHz: sampleRateHz,
+  );
+  final bpmPeaks = SignalProcessor.calculateBpmFromPeaks(peaks, sampleRateHz);
+
+  double? bpm;
+  double confidence = 0.0;
+
+  if (bpmFft != null && bpmPeaks != null) {
+    final delta = (bpmFft - bpmPeaks).abs();
+    bpm = delta <= 8 ? (bpmFft + bpmPeaks) / 2.0 : bpmFft;
+    confidence = (1.0 - (delta / 20.0)).clamp(0.0, 1.0);
+  } else if (bpmFft != null) {
+    bpm = bpmFft;
+    confidence = 0.72;
+  } else if (bpmPeaks != null) {
+    bpm = bpmPeaks;
+    confidence = 0.65;
+  }
+
+  if (bpm == null) return null;
+
+  final peakDensity = (peaks.length / 12.0).clamp(0.0, 1.0);
+  final sampleStrength = (buffer.length / 150.0).clamp(0.0, 1.0);
+  confidence = ((confidence * 0.6) +
+          (peakDensity * 0.2) +
+          (sampleStrength * 0.2))
+      .clamp(0.0, 1.0);
+
+  return {
+    'bpm': bpm,
+    'confidence': confidence,
+  };
+}
 
 class CameraBpmScreen extends StatefulWidget {
   const CameraBpmScreen({
@@ -53,6 +108,7 @@ class CameraBpmScreen extends StatefulWidget {
 class _CameraBpmScreenState extends State<CameraBpmScreen>
     with SingleTickerProviderStateMixin {
   static const _hiltTeal = Color(0xFF00897B);
+  static const _scanRed = Color(0xFFFF5252);
   static const _surfaceTint = Color(0xFFF4F7F6);
   static const _cardTint = Color(0xFFEAF4F2);
   static const _lockInHoldDuration = Duration(seconds: 2);
@@ -63,18 +119,35 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   static const _fingerReleaseCoverageThreshold = 0.55;
   static const _coverageStabilityTolerance = 0.12;
   static const _displayCoverageThreshold = 0.90;
+  static const _displaySignalQualityThreshold = 0.55;
+  static const _lockSignalQualityThreshold = 0.72;
+  static const _minSignalSamples = 90;
+  static const _maxSignalSamples = 180;
+  static const _recentBpmWindow = 5;
+  static const _recentBpmTolerance = 6;
+  static const _finalValidationTolerance = 5;
+  static const _finalValidationConfidenceThreshold = 75;
+  static const _acquisitionTimeout = Duration(seconds: 45);
+  static const _timeoutValidationTolerance = 8;
+  static const _timeoutValidationConfidenceThreshold = 60;
 
   bool _cameraPermissionGranted = false;
   final List<int> _readings = [];
   final List<double> _brightnessSamples = [];
   final List<double> _coverageSamples = [];
+  final List<double> _signalSamples = [];
+  final List<int> _signalTimestampsUs = [];
   int _currentMedian = 0;
   bool _fingerDetected = false;
   double _coverageScore = 0.0;
   double _averageBrightness = 0.0;
   int _warmupReadingsRemaining = BpmFilter.warmupReadings;
+  int _signalConfidence = 0;
+  bool _isComputingSignal = false;
+  final List<int> _recentComputedBpms = [];
   
   Stopwatch? _lockInCountdown;
+  Stopwatch? _acquisitionStopwatch;
   Timer? _uiTimer;
   bool _isLockingIn = false;
   StreamSubscription<int>? _bpmSubscription;
@@ -110,6 +183,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     _bpmSubscription?.cancel();
     _uiTimer?.cancel();
     _lockInCountdown?.stop();
+    _acquisitionStopwatch?.stop();
     WakelockPlus.disable();
     super.dispose();
   }
@@ -137,6 +211,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   }
 
   void _onBPM(int bpm) {
+    if (!widget.grantCameraForTesting) return;
     if (!mounted) return;
 
     if (!_fingerDetected) return;
@@ -199,17 +274,96 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     final nextFingerDetected = _fingerDetected
         ? normalizedScore >= _fingerReleaseCoverageThreshold
         : normalizedScore >= _fingerAcquireCoverageThreshold;
+    final hadFingerDetected = _fingerDetected;
     setState(() {
       _coverageScore = normalizedScore;
       _averageBrightness = averageBrightness;
       _fingerDetected = nextFingerDetected;
+      if (_fingerDetected && !hadFingerDetected) {
+        _acquisitionStopwatch = Stopwatch()..start();
+      }
       if (!_fingerDetected) {
         _readings.clear();
+        _recentComputedBpms.clear();
+        _signalSamples.clear();
+        _signalTimestampsUs.clear();
         _currentMedian = 0;
+        _signalConfidence = 0;
         _warmupReadingsRemaining = BpmFilter.warmupReadings;
         _lockInCountdown?.stop();
         _lockInCountdown = null;
+        _acquisitionStopwatch?.stop();
+        _acquisitionStopwatch = null;
       }
+    });
+
+    if (!widget.grantCameraForTesting && nextFingerDetected) {
+      _captureSignalSample(brightness);
+    }
+  }
+
+  void _captureSignalSample(double brightness) {
+    _signalSamples.add(brightness);
+    _signalTimestampsUs.add(DateTime.now().microsecondsSinceEpoch);
+
+    if (_signalSamples.length > _maxSignalSamples) {
+      _signalSamples.removeAt(0);
+      _signalTimestampsUs.removeAt(0);
+    }
+
+    if (_warmupReadingsRemaining > 0) {
+      _warmupReadingsRemaining--;
+      return;
+    }
+
+    if (_signalSamples.length < _minSignalSamples) return;
+    if (_isComputingSignal) return;
+    if (_signalSamples.length % 8 != 0) return;
+
+    _isComputingSignal = true;
+    final payload = <String, dynamic>{
+      'buffer': List<double>.from(_signalSamples),
+      'timestampsUs': List<int>.from(_signalTimestampsUs),
+    };
+
+    compute(_estimateHeartRateFromSamples, payload).then((result) {
+      if (!mounted || result == null) return;
+      final bpm = (result['bpm'] as double).round();
+      final confidence =
+          ((result['confidence'] as double) * 100).round().clamp(0, 100);
+
+      setState(() {
+        _signalConfidence = confidence;
+
+        if (!BpmFilter.isPlausibleReading(bpm, _readings)) {
+          _lockInCountdown?.stop();
+          _lockInCountdown = null;
+          return;
+        }
+
+        _recentComputedBpms.add(bpm);
+        while (_recentComputedBpms.length > _recentBpmWindow) {
+          _recentComputedBpms.removeAt(0);
+        }
+
+        if (_readings.length < BpmFilter.bufferTarget) {
+          _readings.add(bpm);
+        } else {
+          _readings.removeAt(0);
+          _readings.add(bpm);
+        }
+
+        _currentMedian = _latestStableMedian();
+
+        if (_canLock) {
+          _lockInCountdown ??= Stopwatch()..start();
+        } else {
+          _lockInCountdown?.stop();
+          _lockInCountdown = null;
+        }
+      });
+    }).whenComplete(() {
+      _isComputingSignal = false;
     });
   }
 
@@ -238,10 +392,100 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   bool get _coverageReady =>
       _fingerDetected && _coverageScore >= _displayCoverageThreshold;
 
+  double get _signalQuality {
+    if (!_fingerDetected) return 0.0;
+
+    final coverageQuality = ((_coverageScore - _fingerReleaseCoverageThreshold) /
+            (_displayCoverageThreshold - _fingerReleaseCoverageThreshold))
+        .clamp(0.0, 1.0);
+
+    final sampleQuality =
+        (_readings.length / BpmFilter.lockThreshold).clamp(0.0, 1.0);
+
+    double stabilityQuality = 0.0;
+    if (_readings.length >= BpmFilter.stabilityWindow) {
+      final recent = _readings.sublist(
+        _readings.length - BpmFilter.stabilityWindow,
+      );
+      final median = BpmFilter.medianOf(recent);
+      if (median > 0) {
+        final maxDeviation = recent
+            .map((reading) => (reading - median).abs() / median)
+            .reduce((a, b) => a > b ? a : b);
+        stabilityQuality =
+            (1.0 - (maxDeviation / BpmFilter.stabilityTolerance))
+                .clamp(0.0, 1.0);
+      }
+    }
+
+    final coverageStableQuality = _coverageStable ? 1.0 : 0.0;
+    final confidenceQuality = (_signalConfidence / 100.0).clamp(0.0, 1.0);
+
+    return ((coverageQuality * 0.22) +
+            (sampleQuality * 0.18) +
+            (stabilityQuality * 0.24) +
+            (coverageStableQuality * 0.12) +
+            (confidenceQuality * 0.24))
+        .clamp(0.0, 1.0);
+  }
+
+  bool get _signalQualityReady => _signalQuality >= _lockSignalQualityThreshold;
+
+  bool get _recentBpmClusterStable {
+    if (_recentComputedBpms.length < _recentBpmWindow) return false;
+    final median = BpmFilter.medianOf(_recentComputedBpms);
+    return _recentComputedBpms.every(
+      (bpm) => (bpm - median).abs() <= _recentBpmTolerance,
+    );
+  }
+
+  int get _recentComputedMedian {
+    if (_recentComputedBpms.length < _recentBpmWindow) return 0;
+    return BpmFilter.medianOf(_recentComputedBpms);
+  }
+
   bool get _bpmStable =>
       _currentMedian > 0 && BpmFilter.canLock(_readings);
 
-  bool get _canLock => _coverageReady && _coverageStable && _bpmStable;
+  bool get _baseRevealReady =>
+      _coverageReady &&
+      _coverageStable &&
+      _signalQualityReady &&
+      (_bpmStable || _recentBpmClusterStable);
+
+  bool get _finalValidationPassed {
+    if (!_baseRevealReady) return false;
+    if (_currentMedian <= 0 || _recentComputedMedian <= 0) return false;
+    if (_signalConfidence < _finalValidationConfidenceThreshold) return false;
+    return (_currentMedian - _recentComputedMedian).abs() <=
+        _finalValidationTolerance;
+  }
+
+  bool get _acquisitionTimedOut =>
+      _acquisitionStopwatch != null &&
+      _acquisitionStopwatch!.elapsed >= _acquisitionTimeout;
+
+  bool get _timeoutValidationPassed {
+    if (!_acquisitionTimedOut || !_baseRevealReady) return false;
+    if (_currentMedian <= 0 || _recentComputedMedian <= 0) return false;
+    if (_signalConfidence < _timeoutValidationConfidenceThreshold) {
+      return false;
+    }
+    return (_currentMedian - _recentComputedMedian).abs() <=
+        _timeoutValidationTolerance;
+  }
+
+  bool get _readyToRevealBpm =>
+      _finalValidationPassed || _timeoutValidationPassed;
+
+  bool get _canLock => _finalValidationPassed || _timeoutValidationPassed;
+
+  int get _acquisitionSecondsRemaining {
+    if (_acquisitionStopwatch == null) return _acquisitionTimeout.inSeconds;
+    final remaining = _acquisitionTimeout.inSeconds -
+        _acquisitionStopwatch!.elapsed.inSeconds;
+    return remaining.clamp(0, _acquisitionTimeout.inSeconds);
+  }
 
   String get _lockQualityLabel {
     if (!_fingerDetected) return 'Waiting for finger';
@@ -249,8 +493,23 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       return 'Cover lens more fully';
     }
     if (!_coverageStable) return 'Hold finger steadier';
-    if (!_bpmStable) return 'Collecting pulse';
+    if (!_signalQualityReady) {
+      return 'Acquiring stable heart rate signal';
+    }
+    if (!_bpmStable && !_recentBpmClusterStable) return 'Collecting pulse';
+    if (_acquisitionTimedOut && !_timeoutValidationPassed) {
+      return 'Reposition finger';
+    }
+    if (!_finalValidationPassed) return 'Verifying reading';
     return 'Ready to lock';
+  }
+
+  String get _signalQualityLabel {
+    final quality = _signalQuality;
+    if (quality >= _lockSignalQualityThreshold) return 'Excellent';
+    if (quality >= _displaySignalQualityThreshold) return 'Good';
+    if (quality >= 0.35) return 'Fair';
+    return 'Low';
   }
 
   double get _progress {
@@ -315,9 +574,13 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   }
 
   Widget _buildBpmReadout() {
+    if (!widget.previewMode && !_readyToRevealBpm) {
+      return _buildAcquiringWaveform();
+    }
+
     final displayedBpm = widget.previewMode
         ? (widget.previewBpm ?? 0)
-        : (_coverageScore >= _displayCoverageThreshold ? _currentMedian : 0);
+        : (_readyToRevealBpm ? _currentMedian : 0);
     final bpmText = displayedBpm.toString().padLeft(2, '0');
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -339,6 +602,38 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
             color: Colors.black54,
             fontSize: 18,
             fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAcquiringWaveform() {
+    final waveformSamples = _signalSamples.length >= 24
+        ? _signalSamples.sublist(_signalSamples.length - 24)
+        : List<double>.from(_signalSamples);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 220,
+          height: 72,
+          child: CustomPaint(
+            painter: _HeartWaveformPainter(
+              samples: waveformSamples,
+              active: _fingerDetected,
+              color: _scanRed,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _fingerDetected ? 'Acquiring pulse...' : 'Waiting for finger...',
+          style: const TextStyle(
+            color: Colors.black54,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],
@@ -436,7 +731,9 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
           children: [
             Text(
               _fingerDetected
-                  ? 'Acquiring Pulse...'
+                  ? (_readyToRevealBpm
+                      ? 'Heart rate ready'
+                      : 'Keep finger still for up to 45 secs.')
                   : 'Place finger over the camera lens and flash.',
               textAlign: TextAlign.center,
               style: const TextStyle(
@@ -454,6 +751,20 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
                   color: _hiltTeal,
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+            if (_fingerDetected && !_readyToRevealBpm) ...[
+              const SizedBox(height: 10),
+              Text(
+                _acquisitionTimedOut
+                    ? 'Still not stable enough. Reposition your finger and try again.'
+                    : 'Time remaining: ${_acquisitionSecondsRemaining}s',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -484,6 +795,22 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
                 'Lock quality: $_lockQualityLabel',
                 style: TextStyle(
                   color: _canLock ? _hiltTeal : Colors.black54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Signal quality: $_signalQualityLabel ${(100 * _signalQuality).round()}%',
+                style: TextStyle(
+                  color: _signalQualityReady ? _hiltTeal : Colors.black54,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
@@ -537,6 +864,85 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         ),
       ),
     );
+  }
+}
+
+class _HeartWaveformPainter extends CustomPainter {
+  const _HeartWaveformPainter({
+    required this.samples,
+    required this.active,
+    required this.color,
+  });
+
+  final List<double> samples;
+  final bool active;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final baseline = size.height / 2;
+    final guidePaint = Paint()
+      ..color = color.withValues(alpha: 0.12)
+      ..strokeWidth = 1;
+    canvas.drawLine(
+      Offset(0, baseline),
+      Offset(size.width, baseline),
+      guidePaint,
+    );
+
+    final strokePaint = Paint()
+      ..color = color
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path();
+
+    if (samples.length >= 2) {
+      final minValue = samples.reduce(math.min);
+      final maxValue = samples.reduce(math.max);
+      final range = math.max(maxValue - minValue, 0.001);
+
+      for (var i = 0; i < samples.length; i++) {
+        final x = (i / (samples.length - 1)) * size.width;
+        final normalized = (samples[i] - minValue) / range;
+        final y = size.height -
+            (normalized * (size.height * 0.7)) -
+            (size.height * 0.15);
+        if (i == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+    } else {
+      final pulseHeight = active ? size.height * 0.28 : size.height * 0.10;
+      path.moveTo(0, baseline);
+      path.lineTo(size.width * 0.18, baseline);
+      path.lineTo(size.width * 0.28, baseline - pulseHeight);
+      path.lineTo(size.width * 0.38, baseline + (pulseHeight * 0.4));
+      path.lineTo(size.width * 0.52, baseline - (pulseHeight * 0.2));
+      path.lineTo(size.width * 0.66, baseline);
+      path.lineTo(size.width, baseline);
+    }
+
+    canvas.drawPath(path, strokePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeartWaveformPainter oldDelegate) {
+    return oldDelegate.active != active ||
+        oldDelegate.color != color ||
+        oldDelegate.samples.length != samples.length ||
+        !_sameSamples(oldDelegate.samples, samples);
+  }
+
+  bool _sameSamples(List<double> a, List<double> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if ((a[i] - b[i]).abs() > 0.01) return false;
+    }
+    return true;
   }
 }
 
