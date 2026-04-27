@@ -32,6 +32,31 @@ Map<String, dynamic>? _estimateHeartRateFromSamples(
     sampleRateHz: sampleRateHz,
   );
   final bpmPeaks = SignalProcessor.calculateBpmFromPeaks(peaks, sampleRateHz);
+  final filteredMean =
+      filtered.reduce((a, b) => a + b) / filtered.length;
+  final filteredVariance = filtered
+          .map((value) => math.pow(value - filteredMean, 2).toDouble())
+          .reduce((a, b) => a + b) /
+      filtered.length;
+  final pulseStrength = math.sqrt(filteredVariance);
+
+  double intervalConsistency = 0.0;
+  if (peaks.length >= 4) {
+    final intervals = <double>[];
+    for (int i = 1; i < peaks.length; i++) {
+      intervals.add((peaks[i] - peaks[i - 1]) / sampleRateHz);
+    }
+    final meanInterval = intervals.reduce((a, b) => a + b) / intervals.length;
+    if (meanInterval > 0) {
+      final variance = intervals
+              .map((value) => math.pow(value - meanInterval, 2).toDouble())
+              .reduce((a, b) => a + b) /
+          intervals.length;
+      final coefficientOfVariation = math.sqrt(variance) / meanInterval;
+      intervalConsistency =
+          (1.0 - (coefficientOfVariation / 0.18)).clamp(0.0, 1.0);
+    }
+  }
 
   double? bpm;
   double confidence = 0.0;
@@ -60,6 +85,8 @@ Map<String, dynamic>? _estimateHeartRateFromSamples(
   return {
     'bpm': bpm,
     'confidence': confidence,
+    'pulseStrength': pulseStrength,
+    'intervalConsistency': intervalConsistency,
   };
 }
 
@@ -125,11 +152,17 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   static const _maxSignalSamples = 180;
   static const _recentBpmWindow = 5;
   static const _recentBpmTolerance = 6;
+  static const _recentBpmAcceptanceTolerance = 10;
+  static const _finalLockWindow = 8;
+  static const _finalLockTolerance = 6;
   static const _finalValidationTolerance = 5;
-  static const _finalValidationConfidenceThreshold = 75;
-  static const _acquisitionTimeout = Duration(seconds: 45);
-  static const _timeoutValidationTolerance = 8;
-  static const _timeoutValidationConfidenceThreshold = 60;
+  static const _finalValidationConfidenceThreshold = 60;
+  static const _timeoutValidationConfidenceThreshold = 55;
+  static const _timeoutValidationSignalQualityThreshold = 0.78;
+  static const _timeoutValidationMinElapsed = Duration(seconds: 30);
+  static const _acquisitionTimeout = Duration(seconds: 30);
+  static const _minimumReliableAcquisition = Duration(seconds: 12);
+  static const bool _debugScannerLogs = true;
 
   bool _cameraPermissionGranted = false;
   final List<int> _readings = [];
@@ -139,10 +172,14 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   final List<int> _signalTimestampsUs = [];
   int _currentMedian = 0;
   bool _fingerDetected = false;
+  bool _lastLoggedFingerDetected = false;
+  String _lastLoggedLockQuality = '';
   double _coverageScore = 0.0;
   double _averageBrightness = 0.0;
   int _warmupReadingsRemaining = BpmFilter.warmupReadings;
   int _signalConfidence = 0;
+  double _pulseStrength = 0.0;
+  double _intervalConsistency = 0.0;
   bool _isComputingSignal = false;
   final List<int> _recentComputedBpms = [];
   
@@ -167,6 +204,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
 
     _uiTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
+      _syncLockInCountdown();
       if (_lockInCountdown != null &&
           _lockInCountdown!.elapsedMilliseconds >=
               _lockInHoldDuration.inMilliseconds &&
@@ -210,6 +248,43 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     return BpmFilter.medianOf(recent);
   }
 
+  void _syncLockInCountdown() {
+    if (_canLock && _currentMedian > 0) {
+      _lockInCountdown ??= Stopwatch()..start();
+    } else {
+      _lockInCountdown?.stop();
+      _lockInCountdown = null;
+    }
+  }
+
+  void _debugLog(String message) {
+    if (_debugScannerLogs) {
+      debugPrint('[Scanner] $message');
+    }
+  }
+
+  bool _isAcceptableComputedBpm(int bpm) {
+    if (_recentComputedBpms.length >= 3) {
+      final recentMedian = BpmFilter.medianOf(_recentComputedBpms);
+      final withinRecentBand =
+          (bpm - recentMedian).abs() <= _recentBpmAcceptanceTolerance;
+      if (!withinRecentBand) {
+        _debugLog(
+          'Rejected bpm=$bpm outside recent band '
+          '(median=$recentMedian tolerance=$_recentBpmAcceptanceTolerance)',
+        );
+        return false;
+      }
+    }
+
+    if (!BpmFilter.isPlausibleReading(bpm, _readings)) {
+      _debugLog('Rejected implausible bpm=$bpm against buffer=$_readings');
+      return false;
+    }
+
+    return true;
+  }
+
   void _onBPM(int bpm) {
     if (!widget.grantCameraForTesting) return;
     if (!mounted) return;
@@ -240,13 +315,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       }
 
       _currentMedian = _latestStableMedian();
-
-      if (_canLock) {
-        _lockInCountdown ??= Stopwatch()..start();
-      } else {
-        _lockInCountdown?.stop();
-        _lockInCountdown = null;
-      }
+      _syncLockInCountdown();
     });
   }
 
@@ -281,14 +350,24 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       _fingerDetected = nextFingerDetected;
       if (_fingerDetected && !hadFingerDetected) {
         _acquisitionStopwatch = Stopwatch()..start();
+        _debugLog(
+          'Finger detected. coverage=${(_coverageScore * 100).round()} brightness=${_averageBrightness.toStringAsFixed(1)}',
+        );
       }
       if (!_fingerDetected) {
+        if (hadFingerDetected) {
+          _debugLog(
+            'Finger lost. coverage=${(_coverageScore * 100).round()} brightness=${_averageBrightness.toStringAsFixed(1)}',
+          );
+        }
         _readings.clear();
         _recentComputedBpms.clear();
         _signalSamples.clear();
         _signalTimestampsUs.clear();
         _currentMedian = 0;
         _signalConfidence = 0;
+        _pulseStrength = 0.0;
+        _intervalConsistency = 0.0;
         _warmupReadingsRemaining = BpmFilter.warmupReadings;
         _lockInCountdown?.stop();
         _lockInCountdown = null;
@@ -296,6 +375,10 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         _acquisitionStopwatch = null;
       }
     });
+
+    if (_fingerDetected != _lastLoggedFingerDetected) {
+      _lastLoggedFingerDetected = _fingerDetected;
+    }
 
     if (!widget.grantCameraForTesting && nextFingerDetected) {
       _captureSignalSample(brightness);
@@ -331,18 +414,27 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       final bpm = (result['bpm'] as double).round();
       final confidence =
           ((result['confidence'] as double) * 100).round().clamp(0, 100);
+      final pulseStrength =
+          (result['pulseStrength'] as double?)?.clamp(0.0, 1.0) ?? 0.0;
+      final intervalConsistency =
+          (result['intervalConsistency'] as double?)?.clamp(0.0, 1.0) ?? 0.0;
 
       setState(() {
         _signalConfidence = confidence;
+        _pulseStrength = pulseStrength;
+        _intervalConsistency = intervalConsistency;
+        _debugLog(
+          'Processor bpm=$bpm confidence=$confidence pulse=${pulseStrength.toStringAsFixed(3)} consistency=${intervalConsistency.toStringAsFixed(2)} median=$_currentMedian',
+        );
 
-        if (!BpmFilter.isPlausibleReading(bpm, _readings)) {
+        if (!_isAcceptableComputedBpm(bpm)) {
           _lockInCountdown?.stop();
           _lockInCountdown = null;
           return;
         }
 
         _recentComputedBpms.add(bpm);
-        while (_recentComputedBpms.length > _recentBpmWindow) {
+        while (_recentComputedBpms.length > _finalLockWindow) {
           _recentComputedBpms.removeAt(0);
         }
 
@@ -354,13 +446,10 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         }
 
         _currentMedian = _latestStableMedian();
-
-        if (_canLock) {
-          _lockInCountdown ??= Stopwatch()..start();
-        } else {
-          _lockInCountdown?.stop();
-          _lockInCountdown = null;
-        }
+        _debugLog(
+          'Accepted bpm=$bpm currentMedian=$_currentMedian recent=$_recentComputedBpms signalQuality=${_signalQuality.toStringAsFixed(2)}',
+        );
+        _syncLockInCountdown();
       });
     }).whenComplete(() {
       _isComputingSignal = false;
@@ -369,6 +458,11 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
 
   Future<void> _lockIn() async {
     if (_isLockingIn || !mounted) return;
+    _debugLog(
+      'Locking bpm=$_currentMedian recent=$_recentComputedBpms '
+      'signalQuality=${_signalQuality.toStringAsFixed(2)} '
+      'confidence=$_signalConfidence pulse=${_pulseStrength.toStringAsFixed(3)}',
+    );
     setState(() {
       _isLockingIn = true;
     });
@@ -398,34 +492,19 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     final coverageQuality = ((_coverageScore - _fingerReleaseCoverageThreshold) /
             (_displayCoverageThreshold - _fingerReleaseCoverageThreshold))
         .clamp(0.0, 1.0);
-
     final sampleQuality =
-        (_readings.length / BpmFilter.lockThreshold).clamp(0.0, 1.0);
-
-    double stabilityQuality = 0.0;
-    if (_readings.length >= BpmFilter.stabilityWindow) {
-      final recent = _readings.sublist(
-        _readings.length - BpmFilter.stabilityWindow,
-      );
-      final median = BpmFilter.medianOf(recent);
-      if (median > 0) {
-        final maxDeviation = recent
-            .map((reading) => (reading - median).abs() / median)
-            .reduce((a, b) => a > b ? a : b);
-        stabilityQuality =
-            (1.0 - (maxDeviation / BpmFilter.stabilityTolerance))
-                .clamp(0.0, 1.0);
-      }
-    }
-
+        (_recentComputedBpms.length / _recentBpmWindow).clamp(0.0, 1.0);
     final coverageStableQuality = _coverageStable ? 1.0 : 0.0;
     final confidenceQuality = (_signalConfidence / 100.0).clamp(0.0, 1.0);
+    final strengthQuality = (_pulseStrength / 0.04).clamp(0.0, 1.0);
+    final intervalQuality = _intervalConsistency.clamp(0.0, 1.0);
 
     return ((coverageQuality * 0.22) +
             (sampleQuality * 0.18) +
-            (stabilityQuality * 0.24) +
-            (coverageStableQuality * 0.12) +
-            (confidenceQuality * 0.24))
+            (coverageStableQuality * 0.08) +
+            (confidenceQuality * 0.30) +
+            (strengthQuality * 0.18) +
+            (intervalQuality * 0.04))
         .clamp(0.0, 1.0);
   }
 
@@ -441,22 +520,62 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
 
   int get _recentComputedMedian {
     if (_recentComputedBpms.length < _recentBpmWindow) return 0;
-    return BpmFilter.medianOf(_recentComputedBpms);
+    return BpmFilter.medianOf(
+      _recentComputedBpms.sublist(_recentComputedBpms.length - _recentBpmWindow),
+    );
   }
 
   bool get _bpmStable =>
-      _currentMedian > 0 && BpmFilter.canLock(_readings);
+      _currentMedian > 0 &&
+      _recentComputedBpms.length >= _recentBpmWindow &&
+      _recentBpmClusterStable;
+
+  bool get _finalLockClusterStable {
+    if (_recentComputedBpms.length < _finalLockWindow) return false;
+    final recent = _recentComputedBpms.sublist(
+      _recentComputedBpms.length - _finalLockWindow,
+    );
+    final median = BpmFilter.medianOf(recent);
+    return recent.every(
+      (bpm) => (bpm - median).abs() <= _finalLockTolerance,
+    );
+  }
+
+  bool get _pulseStrengthReady => _pulseStrength >= 0.02;
 
   bool get _baseRevealReady =>
+      _acquisitionStopwatch != null &&
+      _acquisitionStopwatch!.elapsed >= _minimumReliableAcquisition &&
       _coverageReady &&
       _coverageStable &&
       _signalQualityReady &&
-      (_bpmStable || _recentBpmClusterStable);
+      _pulseStrengthReady &&
+      _bpmStable;
 
   bool get _finalValidationPassed {
     if (!_baseRevealReady) return false;
     if (_currentMedian <= 0 || _recentComputedMedian <= 0) return false;
-    if (_signalConfidence < _finalValidationConfidenceThreshold) return false;
+    if (!_finalLockClusterStable) return false;
+    final confidenceReady =
+        _signalConfidence >= _finalValidationConfidenceThreshold ||
+        _signalQuality >= 0.85;
+    if (!confidenceReady) return false;
+    return (_currentMedian - _recentComputedMedian).abs() <=
+        _finalValidationTolerance;
+  }
+
+  bool get _timeoutValidationPassed {
+    if (!_baseRevealReady) return false;
+    if (_acquisitionStopwatch == null ||
+        _acquisitionStopwatch!.elapsed < _timeoutValidationMinElapsed) {
+      return false;
+    }
+    if (_currentMedian <= 0 || _recentComputedMedian <= 0) return false;
+    if (!_finalLockClusterStable) return false;
+    final confidenceReady =
+        _signalConfidence >= _timeoutValidationConfidenceThreshold ||
+        _signalQuality >= _timeoutValidationSignalQualityThreshold;
+    if (!confidenceReady) return false;
     return (_currentMedian - _recentComputedMedian).abs() <=
         _finalValidationTolerance;
   }
@@ -465,20 +584,18 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       _acquisitionStopwatch != null &&
       _acquisitionStopwatch!.elapsed >= _acquisitionTimeout;
 
-  bool get _timeoutValidationPassed {
-    if (!_acquisitionTimedOut || !_baseRevealReady) return false;
-    if (_currentMedian <= 0 || _recentComputedMedian <= 0) return false;
-    if (_signalConfidence < _timeoutValidationConfidenceThreshold) {
-      return false;
-    }
-    return (_currentMedian - _recentComputedMedian).abs() <=
-        _timeoutValidationTolerance;
-  }
-
-  bool get _readyToRevealBpm =>
-      _finalValidationPassed || _timeoutValidationPassed;
+  bool get _readyToRevealBpm => _finalValidationPassed || _timeoutValidationPassed;
 
   bool get _canLock => _finalValidationPassed || _timeoutValidationPassed;
+
+  bool get _hasMeaningfulProgress =>
+      _fingerDetected &&
+      _coverageReady &&
+      _coverageStable &&
+      _pulseStrengthReady &&
+      _signalQuality >= _displaySignalQualityThreshold &&
+      _recentComputedBpms.length >= 3 &&
+      _currentMedian > 0;
 
   int get _acquisitionSecondsRemaining {
     if (_acquisitionStopwatch == null) return _acquisitionTimeout.inSeconds;
@@ -493,14 +610,17 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       return 'Cover lens more fully';
     }
     if (!_coverageStable) return 'Hold finger steadier';
+    if (!_pulseStrengthReady) return 'Strengthen pulse signal';
     if (!_signalQualityReady) {
       return 'Acquiring stable heart rate signal';
     }
-    if (!_bpmStable && !_recentBpmClusterStable) return 'Collecting pulse';
-    if (_acquisitionTimedOut && !_timeoutValidationPassed) {
+    if (!_bpmStable) return 'Collecting pulse';
+    if (_acquisitionTimedOut &&
+        !_canLock &&
+        !_hasMeaningfulProgress) {
       return 'Reposition finger';
     }
-    if (!_finalValidationPassed) return 'Verifying reading';
+    if (!_canLock) return 'Verifying reading';
     return 'Ready to lock';
   }
 
@@ -518,6 +638,18 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     return (_lockInCountdown!.elapsedMilliseconds /
             _lockInHoldDuration.inMilliseconds)
         .clamp(0.0, 1.0);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final label = _lockQualityLabel;
+    if (label != _lastLoggedLockQuality) {
+      _lastLoggedLockQuality = label;
+      _debugLog(
+        'Lock quality="$label" coverage=${(_coverageScore * 100).round()} signalQuality=${(_signalQuality * 100).round()} pulse=${(_pulseStrength * 100).round()} consistency=${(_intervalConsistency * 100).round()} median=$_currentMedian',
+      );
+    }
   }
 
   @override
@@ -816,6 +948,24 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
                 ),
               ),
             ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Pulse ${(100 * _pulseStrength).round()}%  Consistency ${(100 * _intervalConsistency).round()}%',
+                style: TextStyle(
+                  color: _pulseStrengthReady
+                      ? _hiltTeal
+                      : Colors.black54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1067,41 +1217,122 @@ class _HeartBpmCameraView extends StatefulWidget {
   State<_HeartBpmCameraView> createState() => _HeartBpmCameraViewState();
 }
 
-class _HeartBpmCameraViewState extends State<_HeartBpmCameraView> {
+class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
+    with WidgetsBindingObserver {
   static const _windowLength = 50;
+  static const _torchRetryCount = 10;
+  static Future<void> _cameraDisposeBarrier = Future<void>.value();
 
   CameraController? _controller;
   bool _processing = false;
   bool _isCameraInitialized = false;
   int _currentValue = 0;
+  Timer? _captureSettingsRetryTimer;
+  int _captureSettingsRetryTicks = 0;
   final List<SensorValue> _measureWindow = List<SensorValue>.filled(
     _windowLength,
     SensorValue(time: DateTime.now(), value: 0),
     growable: true,
   );
 
+  void _debugLog(String message) {
+    if (_CameraBpmScreenState._debugScannerLogs) {
+      debugPrint('[ScannerCamera] $message');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_initController());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _captureSettingsRetryTimer?.cancel();
     unawaited(_deinitController());
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    if (state == AppLifecycleState.resumed) {
+      _debugLog('App resumed; reapplying capture settings');
+      unawaited(_ensureCaptureSettings(controller));
+      _startCaptureSettingsRetries(controller);
+    }
+  }
+
   Future<void> _deinitController() async {
+    _debugLog('Deinitializing camera controller');
     _isCameraInitialized = false;
+    _captureSettingsRetryTimer?.cancel();
+    _captureSettingsRetryTimer = null;
+    _captureSettingsRetryTicks = 0;
     final controller = _controller;
     _controller = null;
     if (controller == null) return;
-    await controller.dispose();
+    _cameraDisposeBarrier = _cameraDisposeBarrier.catchError((_) {}).then((_) async {
+      if (controller.value.isStreamingImages) {
+        try {
+          await controller.stopImageStream();
+        } catch (_) {}
+      }
+      await controller.dispose();
+    });
+    await _cameraDisposeBarrier;
+  }
+
+  Future<void> _ensureCaptureSettings(CameraController controller) async {
+    if (!controller.value.isInitialized) return;
+
+    try {
+      await controller.setFlashMode(FlashMode.off);
+    } catch (_) {}
+    try {
+      await controller.setFlashMode(FlashMode.torch);
+      _debugLog('Torch requested: ON');
+    } catch (_) {}
+    try {
+      await controller.setExposureMode(ExposureMode.locked);
+      _debugLog('Exposure requested: LOCKED');
+    } catch (_) {}
+    try {
+      await controller.setFocusMode(FocusMode.locked);
+      _debugLog('Focus requested: LOCKED');
+    } catch (_) {}
+  }
+
+  void _startCaptureSettingsRetries(CameraController controller) {
+    _captureSettingsRetryTimer?.cancel();
+    _captureSettingsRetryTicks = 0;
+    _captureSettingsRetryTimer = Timer.periodic(
+      const Duration(milliseconds: 700),
+      (timer) {
+        if (!mounted || _controller != controller || !controller.value.isInitialized) {
+          timer.cancel();
+          return;
+        }
+        _debugLog('Retrying capture settings (${_captureSettingsRetryTicks + 1}/$_torchRetryCount)');
+        unawaited(_ensureCaptureSettings(controller));
+        _captureSettingsRetryTicks++;
+        if (_captureSettingsRetryTicks >= _torchRetryCount) {
+          timer.cancel();
+          _debugLog('Finished capture settings retries');
+        }
+      },
+    );
   }
 
   Future<void> _initController() async {
     if (_controller != null) return;
+    await _cameraDisposeBarrier;
+    _debugLog('Initializing camera controller');
 
     final cameras = await availableCameras();
     if (cameras.isEmpty) return;
@@ -1121,21 +1352,17 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView> {
 
     try {
       await controller.initialize();
-      try {
-        await controller.setFlashMode(FlashMode.torch);
-      } catch (_) {}
-      try {
-        await controller.setExposureMode(ExposureMode.locked);
-      } catch (_) {}
-      try {
-        await controller.setFocusMode(FocusMode.locked);
-      } catch (_) {}
+      _debugLog('Camera initialized: ${backCamera.name}');
+      await _ensureCaptureSettings(controller);
 
       await controller.startImageStream((image) {
         if (_processing || !mounted) return;
         _processing = true;
         _scanImage(image);
       });
+      _debugLog('Image stream started');
+      await _ensureCaptureSettings(controller);
+      _startCaptureSettingsRetries(controller);
 
       if (!mounted) {
         await controller.dispose();
