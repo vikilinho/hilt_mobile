@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:hilt_mobile/src/services/step_service.dart';
 import 'package:hilt_mobile/src/workout_manager.dart';
-import 'package:isar/isar.dart';
+import 'package:isar_community/isar.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:mocktail/mocktail.dart';

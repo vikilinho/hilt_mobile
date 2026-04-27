@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:heart_bpm/heart_bpm.dart' show SensorValue;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -133,36 +134,47 @@ class CameraBpmScreen extends StatefulWidget {
 }
 
 class _CameraBpmScreenState extends State<CameraBpmScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const _hiltTeal = Color(0xFF00897B);
   static const _scanRed = Color(0xFFFF5252);
-  static const _surfaceTint = Color(0xFFF4F7F6);
-  static const _cardTint = Color(0xFFEAF4F2);
-  static const _lockInHoldDuration = Duration(seconds: 2);
+  static const _surfaceTintDark = Color(0xFF060B0A);
+  static const _surfaceTintLight = Color(0xFFEAF5F3);
+  static const _cardTintDark = Color(0xFF0D1413);
+  static const _cardTintLight = Color(0xFFFFFFFF);
+  static const _scannerTextDark = Color(0xFFE7F1EF);
+  static const _scannerTextLight = Color(0xFF0D1413);
+  static const _scannerMutedTextDark = Color(0xFF9FB0AC);
+  static const _scannerMutedTextLight = Color(0xFF58706B);
+  static const _lockInHoldDuration = Duration(milliseconds: 1200);
   static const _coverageWindowSize = 10;
   static const _coverageMinBrightness = 15.0;
   static const _coverageMaxBrightness = 90.0;
-  static const _fingerAcquireCoverageThreshold = 0.75;
-  static const _fingerReleaseCoverageThreshold = 0.55;
+  static const _fingerAcquireCoverageThreshold = 0.68;
+  static const _fingerReleaseCoverageThreshold = 0.45;
+  static const _fingerReleaseDebounceFrames = 4;
   static const _coverageStabilityTolerance = 0.12;
-  static const _displayCoverageThreshold = 0.90;
+  static const _displayCoverageThreshold = 0.75;
   static const _displaySignalQualityThreshold = 0.55;
   static const _lockSignalQualityThreshold = 0.72;
   static const _minSignalSamples = 90;
   static const _maxSignalSamples = 180;
   static const _recentBpmWindow = 5;
-  static const _recentBpmTolerance = 6;
-  static const _recentBpmAcceptanceTolerance = 10;
-  static const _finalLockWindow = 8;
-  static const _finalLockTolerance = 6;
+  static const _recentBpmTolerance = 4;
+  static const _recentBpmAcceptanceTolerance = 6;
+  static const _maxStableDropDelta = 4;
+  static const _maxStableRiseDelta = 8;
+  static const _finalLockWindow = 6;
+  static const _finalLockTolerance = 4;
   static const _finalValidationTolerance = 5;
-  static const _finalValidationConfidenceThreshold = 60;
-  static const _timeoutValidationConfidenceThreshold = 55;
+  static const _finalValidationConfidenceThreshold = 58;
+  static const _timeoutValidationConfidenceThreshold = 52;
   static const _timeoutValidationSignalQualityThreshold = 0.78;
   static const _timeoutValidationMinElapsed = Duration(seconds: 30);
-  static const _acquisitionTimeout = Duration(seconds: 30);
+  static const _acquisitionTimeout = Duration(seconds: 45);
   static const _minimumReliableAcquisition = Duration(seconds: 12);
   static const bool _debugScannerLogs = true;
+  static const _scannerBrightnessChannel =
+      MethodChannel('com.hiltking.app/scanner_brightness');
 
   bool _cameraPermissionGranted = false;
   final List<int> _readings = [];
@@ -182,6 +194,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   double _intervalConsistency = 0.0;
   bool _isComputingSignal = false;
   final List<int> _recentComputedBpms = [];
+  int _fingerReleaseFrameCount = 0;
   
   Stopwatch? _lockInCountdown;
   Stopwatch? _acquisitionStopwatch;
@@ -189,9 +202,24 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   bool _isLockingIn = false;
   StreamSubscription<int>? _bpmSubscription;
 
+  bool get _nightMode {
+    final hour = DateTime.now().hour;
+    return hour >= 19 || hour < 7;
+  }
+
+  Color get _surfaceTint => _nightMode ? _surfaceTintDark : _surfaceTintLight;
+  Color get _cardTint => _nightMode ? _cardTintDark : _cardTintLight;
+  Color get _scannerText => _nightMode ? _scannerTextDark : _scannerTextLight;
+  Color get _scannerMutedText =>
+      _nightMode ? _scannerMutedTextDark : _scannerMutedTextLight;
+  Color get _screenBackground => _nightMode ? Colors.black : const Color(0xFFF4FBF9);
+  double get _scannerBrightnessLevel => _nightMode ? 0.02 : 0.04;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_dimScreenForScanner());
     _requestCamera();
     
     if (widget.bpmStream != null) {
@@ -218,12 +246,43 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _bpmSubscription?.cancel();
     _uiTimer?.cancel();
     _lockInCountdown?.stop();
     _acquisitionStopwatch?.stop();
     WakelockPlus.disable();
+    unawaited(_restoreScreenBrightness());
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_dimScreenForScanner());
+    }
+  }
+
+  Future<void> _dimScreenForScanner() async {
+    try {
+      await _scannerBrightnessChannel.invokeMethod<void>('dimForScanner', {
+        'level': _scannerBrightnessLevel,
+      });
+      _debugLog(
+        'Scanner screen brightness clamped to ${(_scannerBrightnessLevel * 100).round()}%',
+      );
+    } catch (e) {
+      _debugLog('Unable to dim scanner screen: $e');
+    }
+  }
+
+  Future<void> _restoreScreenBrightness() async {
+    try {
+      await _scannerBrightnessChannel.invokeMethod<void>('restoreBrightness');
+      _debugLog('Scanner screen brightness restored');
+    } catch (e) {
+      _debugLog('Unable to restore scanner screen brightness: $e');
+    }
   }
 
   Future<void> _requestCamera() async {
@@ -264,6 +323,28 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   }
 
   bool _isAcceptableComputedBpm(int bpm) {
+    final lastAcceptedBpm = _recentComputedBpms.isNotEmpty
+        ? _recentComputedBpms.last
+        : (_readings.isNotEmpty ? _readings.last : 0);
+    if (lastAcceptedBpm > 0 && _recentComputedBpms.length >= 3) {
+      final drop = lastAcceptedBpm - bpm;
+      final rise = bpm - lastAcceptedBpm;
+      if (drop > _maxStableDropDelta) {
+        _debugLog(
+          'Rejected bpm=$bpm for sudden drop '
+          '(last=$lastAcceptedBpm maxDrop=$_maxStableDropDelta)',
+        );
+        return false;
+      }
+      if (rise > _maxStableRiseDelta) {
+        _debugLog(
+          'Rejected bpm=$bpm for sudden rise '
+          '(last=$lastAcceptedBpm maxRise=$_maxStableRiseDelta)',
+        );
+        return false;
+      }
+    }
+
     if (_recentComputedBpms.length >= 3) {
       final recentMedian = BpmFilter.medianOf(_recentComputedBpms);
       final withinRecentBand =
@@ -340,9 +421,22 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     if (_coverageSamples.length > _coverageWindowSize) {
       _coverageSamples.removeAt(0);
     }
-    final nextFingerDetected = _fingerDetected
-        ? normalizedScore >= _fingerReleaseCoverageThreshold
-        : normalizedScore >= _fingerAcquireCoverageThreshold;
+    var nextFingerDetected = _fingerDetected;
+    if (_fingerDetected) {
+      if (normalizedScore < _fingerReleaseCoverageThreshold) {
+        _fingerReleaseFrameCount++;
+        if (_fingerReleaseFrameCount >= _fingerReleaseDebounceFrames) {
+          nextFingerDetected = false;
+        }
+      } else {
+        _fingerReleaseFrameCount = 0;
+      }
+    } else {
+      _fingerReleaseFrameCount = 0;
+      if (normalizedScore >= _fingerAcquireCoverageThreshold) {
+        nextFingerDetected = true;
+      }
+    }
     final hadFingerDetected = _fingerDetected;
     setState(() {
       _coverageScore = normalizedScore;
@@ -368,6 +462,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         _signalConfidence = 0;
         _pulseStrength = 0.0;
         _intervalConsistency = 0.0;
+        _fingerReleaseFrameCount = 0;
         _warmupReadingsRemaining = BpmFilter.warmupReadings;
         _lockInCountdown?.stop();
         _lockInCountdown = null;
@@ -484,7 +579,10 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   }
 
   bool get _coverageReady =>
-      _fingerDetected && _coverageScore >= _displayCoverageThreshold;
+      _fingerDetected &&
+      (_coverageScore >= _displayCoverageThreshold ||
+          (_recentComputedBpms.isNotEmpty &&
+              _signalQuality >= _displaySignalQualityThreshold));
 
   double get _signalQuality {
     if (!_fingerDetected) return 0.0;
@@ -606,7 +704,9 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
 
   String get _lockQualityLabel {
     if (!_fingerDetected) return 'Waiting for finger';
-    if (_coverageScore < _displayCoverageThreshold) {
+    if (!_coverageReady &&
+        _recentComputedBpms.isEmpty &&
+        _signalQuality < _displaySignalQualityThreshold) {
       return 'Cover lens more fully';
     }
     if (!_coverageStable) return 'Hold finger steadier';
@@ -655,20 +755,20 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: _screenBackground,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _screenBackground,
         elevation: 0,
         leading: widget.forced
             ? null
             : IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.black87),
+                icon: Icon(Icons.close_rounded, color: _scannerText),
                 onPressed: () => Navigator.of(context).pop(0),
               ),
-        title: const Text(
+        title: Text(
           'HEART RATE',
           style: TextStyle(
-            color: Colors.black87,
+            color: _scannerText,
             fontWeight: FontWeight.w800,
             letterSpacing: 1.2,
             fontSize: 15,
@@ -679,10 +779,10 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
       body: SafeArea(
         child: _cameraPermissionGranted || widget.previewMode || widget.grantCameraForTesting
             ? _buildMainContent()
-            : const Center(
+            : Center(
                 child: Text(
                   'Camera permission required.',
-                  style: TextStyle(color: Colors.black54),
+                  style: TextStyle(color: _scannerMutedText),
                 ),
               ),
       ),
@@ -698,8 +798,6 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         _buildBpmReadout(),
         const Spacer(),
         _buildInstructionCard(),
-        const SizedBox(height: 12),
-        _buildLockInButton(),
         const SizedBox(height: 24),
       ],
     );
@@ -728,10 +826,10 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
           ),
         ),
         const SizedBox(width: 6),
-        const Text(
+        Text(
           'BPM',
           style: TextStyle(
-            color: Colors.black54,
+            color: _scannerMutedText,
             fontSize: 18,
             fontWeight: FontWeight.w500,
           ),
@@ -762,8 +860,8 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         const SizedBox(height: 8),
         Text(
           _fingerDetected ? 'Acquiring pulse...' : 'Waiting for finger...',
-          style: const TextStyle(
-            color: Colors.black54,
+          style: TextStyle(
+            color: _scannerMutedText,
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
@@ -789,7 +887,9 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
                 strokeWidth: 6,
                 backgroundColor: _surfaceTint,
                 valueColor: AlwaysStoppedAnimation<Color>(
-                  _canLock ? _hiltTeal : Colors.grey.shade300,
+                  _canLock
+                      ? _hiltTeal
+                      : (_nightMode ? Colors.grey.shade300 : const Color(0xFFB6C9C5)),
                 ),
               );
             },
@@ -832,7 +932,9 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
               width: size - 32,
               height: size - 32,
               alignment: Alignment.center,
-              color: Colors.white.withValues(alpha: 0.7),
+              color: (_nightMode ? Colors.black : Colors.white).withValues(
+                alpha: _nightMode ? 0.78 : 0.74,
+              ),
               child: const Text(
                 'COVER LENS',
                 style: TextStyle(
@@ -849,6 +951,16 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   }
 
   Widget _buildInstructionCard() {
+    final headlineText = !_fingerDetected
+        ? 'Place finger over the camera lens and flash.'
+        : _readyToRevealBpm
+            ? 'Heart rate ready'
+            : 'Keep finger still for up to ${_acquisitionSecondsRemaining}s.';
+    final supportingText =
+        _fingerDetected && !_readyToRevealBpm && _acquisitionTimedOut
+            ? 'Still not stable enough. Reposition your finger and try again.'
+            : null;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18),
       child: Container(
@@ -857,45 +969,39 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         decoration: BoxDecoration(
           color: _cardTint,
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         ),
         child: Column(
           children: [
             Text(
-              _fingerDetected
-                  ? (_readyToRevealBpm
-                      ? 'Heart rate ready'
-                      : 'Keep finger still for up to 45 secs.')
-                  : 'Place finger over the camera lens and flash.',
+              headlineText,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: _hiltTeal,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
               ),
             ),
             if (widget.message != null) ...[
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               Text(
                 widget.message!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: _hiltTeal,
-                  fontSize: 12,
+                style: TextStyle(
+                  color: _scannerMutedText,
+                  fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
               ),
             ],
-            if (_fingerDetected && !_readyToRevealBpm) ...[
-              const SizedBox(height: 10),
+            if (supportingText != null) ...[
+              const SizedBox(height: 12),
               Text(
-                _acquisitionTimedOut
-                    ? 'Still not stable enough. Reposition your finger and try again.'
-                    : 'Time remaining: ${_acquisitionSecondsRemaining}s',
+                supportingText,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.black54,
-                  fontSize: 12,
+                style: TextStyle(
+                  color: _scannerMutedText,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -904,14 +1010,16 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.65),
+                color: (_nightMode ? Colors.white : _hiltTeal).withValues(
+                  alpha: _nightMode ? 0.06 : 0.08,
+                ),
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                'Coverage ${(100 * _coverageScore).round()}%  Brightness ${_averageBrightness.toStringAsFixed(0)}',
+                _lockQualityLabel,
                 style: TextStyle(
-                  color: _fingerDetected ? _hiltTeal : Colors.black54,
-                  fontSize: 12,
+                  color: _canLock ? _hiltTeal : _scannerText,
+                  fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -920,97 +1028,21 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.65),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                'Lock quality: $_lockQualityLabel',
-                style: TextStyle(
-                  color: _canLock ? _hiltTeal : Colors.black54,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+                color: (_nightMode ? Colors.white : _hiltTeal).withValues(
+                  alpha: _nightMode ? 0.06 : 0.08,
                 ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.65),
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
                 'Signal quality: $_signalQualityLabel ${(100 * _signalQuality).round()}%',
                 style: TextStyle(
-                  color: _signalQualityReady ? _hiltTeal : Colors.black54,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.65),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                'Pulse ${(100 * _pulseStrength).round()}%  Consistency ${(100 * _intervalConsistency).round()}%',
-                style: TextStyle(
-                  color: _pulseStrengthReady
-                      ? _hiltTeal
-                      : Colors.black54,
-                  fontSize: 12,
+                  color: _signalQualityReady ? _hiltTeal : _scannerText,
+                  fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLockInButton() {
-    return AnimatedOpacity(
-      opacity: _canLock ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 400),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        child: SizedBox(
-          width: double.infinity,
-          height: 64,
-          child: ElevatedButton(
-            onPressed: _canLock ? _lockIn : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _hiltTeal,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: Colors.black.withValues(alpha: 0.05),
-              disabledForegroundColor: Colors.black26,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              elevation: 0,
-            ),
-            child: _isLockingIn
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : const Text(
-                    'LOCK IN',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-          ),
         ),
       ),
     );
@@ -1220,7 +1252,7 @@ class _HeartBpmCameraView extends StatefulWidget {
 class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
     with WidgetsBindingObserver {
   static const _windowLength = 50;
-  static const _torchRetryCount = 10;
+  static const _torchRetryCount = 2;
   static Future<void> _cameraDisposeBarrier = Future<void>.value();
 
   CameraController? _controller;
@@ -1263,7 +1295,8 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
 
     if (state == AppLifecycleState.resumed) {
       _debugLog('App resumed; reapplying capture settings');
-      unawaited(_ensureCaptureSettings(controller));
+      unawaited(_ensureCaptureSettings(controller, includeTorch: false));
+      unawaited(_requestTorch(controller, reason: 'resume'));
       _startCaptureSettingsRetries(controller);
     }
   }
@@ -1288,24 +1321,40 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
     await _cameraDisposeBarrier;
   }
 
-  Future<void> _ensureCaptureSettings(CameraController controller) async {
+  Future<void> _requestTorch(
+    CameraController controller, {
+    required String reason,
+  }) async {
     if (!controller.value.isInitialized) return;
-
-    try {
-      await controller.setFlashMode(FlashMode.off);
-    } catch (_) {}
     try {
       await controller.setFlashMode(FlashMode.torch);
-      _debugLog('Torch requested: ON');
-    } catch (_) {}
+      _debugLog('Torch requested: ON ($reason)');
+    } catch (e) {
+      _debugLog('Torch request failed ($reason): $e');
+    }
+  }
+
+  Future<void> _ensureCaptureSettings(
+    CameraController controller, {
+    bool includeTorch = true,
+  }) async {
+    if (!controller.value.isInitialized) return;
+
+    if (includeTorch) {
+      await _requestTorch(controller, reason: 'capture-settings');
+    }
     try {
       await controller.setExposureMode(ExposureMode.locked);
       _debugLog('Exposure requested: LOCKED');
-    } catch (_) {}
+    } catch (e) {
+      _debugLog('Exposure request failed: $e');
+    }
     try {
       await controller.setFocusMode(FocusMode.locked);
       _debugLog('Focus requested: LOCKED');
-    } catch (_) {}
+    } catch (e) {
+      _debugLog('Focus request failed: $e');
+    }
   }
 
   void _startCaptureSettingsRetries(CameraController controller) {
@@ -1319,7 +1368,12 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
           return;
         }
         _debugLog('Retrying capture settings (${_captureSettingsRetryTicks + 1}/$_torchRetryCount)');
-        unawaited(_ensureCaptureSettings(controller));
+        unawaited(
+          _ensureCaptureSettings(
+            controller,
+            includeTorch: _captureSettingsRetryTicks <= 1,
+          ),
+        );
         _captureSettingsRetryTicks++;
         if (_captureSettingsRetryTicks >= _torchRetryCount) {
           timer.cancel();
@@ -1353,7 +1407,7 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
     try {
       await controller.initialize();
       _debugLog('Camera initialized: ${backCamera.name}');
-      await _ensureCaptureSettings(controller);
+      await _ensureCaptureSettings(controller, includeTorch: false);
 
       await controller.startImageStream((image) {
         if (_processing || !mounted) return;
@@ -1361,7 +1415,8 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
         _scanImage(image);
       });
       _debugLog('Image stream started');
-      await _ensureCaptureSettings(controller);
+      await _requestTorch(controller, reason: 'post-stream-start');
+      await _ensureCaptureSettings(controller, includeTorch: false);
       _startCaptureSettingsRetries(controller);
 
       if (!mounted) {

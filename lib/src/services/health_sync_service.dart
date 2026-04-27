@@ -3,7 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:health/health.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:intl/intl.dart';
-import 'package:isar/isar.dart';
+import 'package:isar_community/isar.dart';
 import 'step_service.dart';
 import 'health_authorization.dart';
 import 'health_step_totals.dart';
