@@ -149,6 +149,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   static const _coverageWindowSize = 10;
   static const _coverageMinBrightness = 15.0;
   static const _coverageMaxBrightness = 90.0;
+  static const _fingerExposureSpikeBrightness = 105.0;
   static const _fingerAcquireCoverageThreshold = 0.68;
   static const _fingerReleaseCoverageThreshold = 0.45;
   static const _fingerReleaseDebounceFrames = 4;
@@ -171,6 +172,9 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   static const _timeoutValidationSignalQualityThreshold = 0.78;
   static const _timeoutValidationMinElapsed = Duration(seconds: 30);
   static const _acquisitionTimeout = Duration(seconds: 45);
+  static const _timeoutLikelyMinReadings = 4;
+  static const _timeoutLikelySignalQualityThreshold = 0.60;
+  static const _timeoutLikelyConfidenceThreshold = 45;
   static const _minimumReliableAcquisition = Duration(seconds: 12);
   static const bool _debugScannerLogs = true;
   static const _scannerBrightnessChannel =
@@ -233,7 +237,9 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     _uiTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
       _syncLockInCountdown();
-      if (_lockInCountdown != null &&
+      if (_bestEffortTimeoutReady && _currentMedian > 0) {
+        _lockIn();
+      } else if (_lockInCountdown != null &&
           _lockInCountdown!.elapsedMilliseconds >=
               _lockInHoldDuration.inMilliseconds &&
           _currentMedian > 0) {
@@ -308,7 +314,10 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
   }
 
   void _syncLockInCountdown() {
-    if (_canLock && _currentMedian > 0) {
+    if (_bestEffortTimeoutReady && _currentMedian > 0) {
+      _lockInCountdown?.stop();
+      _lockInCountdown = null;
+    } else if (_canLock && _currentMedian > 0) {
       _lockInCountdown ??= Stopwatch()..start();
     } else {
       _lockInCountdown?.stop();
@@ -421,9 +430,19 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
     if (_coverageSamples.length > _coverageWindowSize) {
       _coverageSamples.removeAt(0);
     }
+    final isExposureSpike =
+        averageBrightness >= _fingerExposureSpikeBrightness &&
+        normalizedScore < _fingerReleaseCoverageThreshold;
     var nextFingerDetected = _fingerDetected;
     if (_fingerDetected) {
-      if (normalizedScore < _fingerReleaseCoverageThreshold) {
+      if (isExposureSpike) {
+        _debugLog(
+          'Ignoring exposure spike while finger present. '
+          'brightness=${averageBrightness.toStringAsFixed(1)} '
+          'coverage=${(normalizedScore * 100).round()}',
+        );
+        _fingerReleaseFrameCount = 0;
+      } else if (normalizedScore < _fingerReleaseCoverageThreshold) {
         _fingerReleaseFrameCount++;
         if (_fingerReleaseFrameCount >= _fingerReleaseDebounceFrames) {
           nextFingerDetected = false;
@@ -678,13 +697,32 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         _finalValidationTolerance;
   }
 
+  bool get _bestEffortTimeoutReady {
+    if (!_acquisitionTimedOut) return false;
+    if (!_fingerDetected) return false;
+    if (_currentMedian <= 0) return false;
+    if (_recentComputedBpms.length < _timeoutLikelyMinReadings) return false;
+    if (!_coverageStable) return false;
+    if (_signalQuality < _timeoutLikelySignalQualityThreshold &&
+        _signalConfidence < _timeoutLikelyConfidenceThreshold) {
+      return false;
+    }
+    return true;
+  }
+
   bool get _acquisitionTimedOut =>
       _acquisitionStopwatch != null &&
       _acquisitionStopwatch!.elapsed >= _acquisitionTimeout;
 
-  bool get _readyToRevealBpm => _finalValidationPassed || _timeoutValidationPassed;
+  bool get _readyToRevealBpm =>
+      _finalValidationPassed ||
+      _timeoutValidationPassed ||
+      _bestEffortTimeoutReady;
 
-  bool get _canLock => _finalValidationPassed || _timeoutValidationPassed;
+  bool get _canLock =>
+      _finalValidationPassed ||
+      _timeoutValidationPassed ||
+      _bestEffortTimeoutReady;
 
   bool get _hasMeaningfulProgress =>
       _fingerDetected &&
@@ -720,6 +758,7 @@ class _CameraBpmScreenState extends State<CameraBpmScreen>
         !_hasMeaningfulProgress) {
       return 'Reposition finger';
     }
+    if (_bestEffortTimeoutReady) return 'Finalizing reading';
     if (!_canLock) return 'Verifying reading';
     return 'Ready to lock';
   }
@@ -1260,6 +1299,7 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
   bool _isCameraInitialized = false;
   int _currentValue = 0;
   Timer? _captureSettingsRetryTimer;
+  final List<Timer> _torchRecoveryTimers = [];
   int _captureSettingsRetryTicks = 0;
   final List<SensorValue> _measureWindow = List<SensorValue>.filled(
     _windowLength,
@@ -1284,6 +1324,9 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _captureSettingsRetryTimer?.cancel();
+    for (final timer in _torchRecoveryTimers) {
+      timer.cancel();
+    }
     unawaited(_deinitController());
     super.dispose();
   }
@@ -1305,6 +1348,10 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
     _debugLog('Deinitializing camera controller');
     _isCameraInitialized = false;
     _captureSettingsRetryTimer?.cancel();
+    for (final timer in _torchRecoveryTimers) {
+      timer.cancel();
+    }
+    _torchRecoveryTimers.clear();
     _captureSettingsRetryTimer = null;
     _captureSettingsRetryTicks = 0;
     final controller = _controller;
@@ -1383,6 +1430,29 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
     );
   }
 
+  void _scheduleTorchRecoveryPasses(CameraController controller) {
+    for (final timer in _torchRecoveryTimers) {
+      timer.cancel();
+    }
+    _torchRecoveryTimers.clear();
+
+    const recoveryDelays = [
+      Duration(milliseconds: 1200),
+      Duration(milliseconds: 2600),
+    ];
+
+    for (var i = 0; i < recoveryDelays.length; i++) {
+      final timer = Timer(recoveryDelays[i], () {
+        if (!mounted || _controller != controller || !controller.value.isInitialized) {
+          return;
+        }
+        _debugLog('Running torch recovery pass ${i + 1}/${recoveryDelays.length}');
+        unawaited(_requestTorch(controller, reason: 'delayed-recovery-${i + 1}'));
+      });
+      _torchRecoveryTimers.add(timer);
+    }
+  }
+
   Future<void> _initController() async {
     if (_controller != null) return;
     await _cameraDisposeBarrier;
@@ -1418,6 +1488,7 @@ class _HeartBpmCameraViewState extends State<_HeartBpmCameraView>
       await _requestTorch(controller, reason: 'post-stream-start');
       await _ensureCaptureSettings(controller, includeTorch: false);
       _startCaptureSettingsRetries(controller);
+      _scheduleTorchRecoveryPasses(controller);
 
       if (!mounted) {
         await controller.dispose();
