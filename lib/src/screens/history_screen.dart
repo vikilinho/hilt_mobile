@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hilt_core/hilt_core.dart';
-import 'package:intl/intl.dart';
 import '../workout_manager.dart';
 import '../widgets/history_summary.dart';
 import '../widgets/history_item_card.dart';
+import '../widgets/weekly_walks_view.dart';
 import 'post_workout_screen.dart';
-import 'step_detail_view.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -204,126 +203,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
       );
     }
 
-    return ListView.builder(
+    return WeeklyWalksView(
       key: const ValueKey('walks_view'),
-      padding: const EdgeInsets.only(top: 8, bottom: 24, left: 16, right: 16),
-      itemCount: sessions.length,
-      itemBuilder: (context, index) {
-        final entry = sessions[index];
-        final steps = entry.steps ?? 0;
-        final isMatchReady = steps >= 10000;
-
-        return Dismissible(
-          key: ValueKey('walk_${entry.id}'),
-          direction: DismissDirection.endToStart,
-          onDismissed: (_) => manager.deleteSession(entry.id),
-          background: Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 20),
-            decoration: BoxDecoration(
-              color: Colors.redAccent,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            margin: const EdgeInsets.symmetric(vertical: 6),
-            child:
-                const Icon(Icons.delete_outline, color: Colors.white, size: 30),
-          ),
-          child: GestureDetector(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => StepDetailView(session: entry),
-                ),
-              );
-            },
-            child: Card(
-              margin: const EdgeInsets.symmetric(vertical: 6),
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              elevation: 2,
-              shadowColor: Colors.black.withValues(alpha: 0.05),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  children: [
-                  // Date Block
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _getWalkDateLabel(entry.timestamp),
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: isMatchReady
-                                    ? const Color(0xFF00897B)
-                                    : Colors.black87,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          DateFormat.yMMMd().format(entry.timestamp),
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.grey.shade500,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Steps Number
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        NumberFormat.decimalPattern().format(steps),
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
-                            ?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: isMatchReady
-                                  ? const Color(0xFF00897B)
-                                  : Colors.black87,
-                            ),
-                      ),
-                      Text(
-                        "TOTAL STEPS",
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: Colors.grey.shade500,
-                              letterSpacing: 1.2,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 9,
-                            ),
-                      ),
-                    ],
-                  ),
-
-
-                ],
-              ),
-            ),
-          ),
-          ),
-        );
-      },
+      sessions: sessions,
+      onDeleteSession: manager.deleteSession,
     );
-  }
-
-  String _getWalkDateLabel(DateTime date) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final aDate = DateTime(date.year, date.month, date.day);
-    final diff = today.difference(aDate).inDays;
-
-    if (diff == 0) return "Today";
-    if (diff == 1) return "Yesterday";
-    return DateFormat('EEEE').format(date); // e.g., "Monday"
   }
 
   List<dynamic> _groupSessions(List<WorkoutSession> sessions) {
