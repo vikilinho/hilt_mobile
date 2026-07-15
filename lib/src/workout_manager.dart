@@ -62,6 +62,7 @@ class WorkoutManager extends ChangeNotifier {
   final _watchConnectivity = WatchConnectivity();
   StreamSubscription? _watchSubscription;
   StreamSubscription? _watchContextSubscription;
+  StreamSubscription? _nativeWatchSubscription;
   StreamSubscription? _bikeSubscription;
 
   // FTMS Bike Connectivity
@@ -1127,6 +1128,7 @@ class WorkoutManager extends ChangeNotifier {
     _recoverySubscription?.cancel();
     _watchSubscription?.cancel();
     _watchContextSubscription?.cancel();
+    _nativeWatchSubscription?.cancel();
     _bikeSubscription?.cancel();
     _sessionCompleteController.close();
     _bpmController.close();
@@ -1135,6 +1137,24 @@ class WorkoutManager extends ChangeNotifier {
 
   void _initDataLayer() {
     debugPrint("[Mobile] Initializing Watch Connectivity...");
+    if (Platform.isAndroid) {
+      _nativeWatchSubscription =
+          const EventChannel('com.hiltking.app/watch_heart_rate')
+              .receiveBroadcastStream()
+              .listen(
+        (payload) {
+          if (payload is Map) {
+            _handleWatchPayload(
+              Map<String, dynamic>.from(payload),
+              channel: 'native message',
+            );
+          }
+        },
+        onError: (Object error) {
+          debugPrint('[Mobile] Native watch receiver error: $error');
+        },
+      );
+    }
     _watchSubscription = _watchConnectivity.messageStream.listen((message) {
       _handleWatchPayload(message, channel: 'message');
     });

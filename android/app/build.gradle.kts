@@ -67,4 +67,8 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // MainActivity receives live Wear OS heart-rate messages directly. Keeping
+    // this dependency explicit avoids relying on the Flutter plugin's
+    // transitive dependency and keeps the receiver available after upgrades.
+    implementation("com.google.android.gms:play-services-wearable:18.2.0")
 }

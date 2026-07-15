@@ -3,18 +3,41 @@ import 'package:health/health.dart';
 import 'package:hilt_mobile/src/services/health_sync_service.dart';
 
 void main() {
+  group('update-safe step reconciliation', () {
+    test('does not replace a persisted same-day total with startup zero', () {
+      expect(
+        HealthSyncService.preserveHighestSameDayTotal(6321, 0),
+        6321,
+      );
+    });
+
+    test('does not replace a persisted total with a partial lower sync', () {
+      expect(
+        HealthSyncService.preserveHighestSameDayTotal(6321, 2100),
+        6321,
+      );
+    });
+
+    test('accepts a newer higher total', () {
+      expect(
+        HealthSyncService.preserveHighestSameDayTotal(6321, 7000),
+        7000,
+      );
+    });
+  });
+
   group('HealthSyncService Unit Tests', () {
     test('generateDailyId must return 20260404 for April 4, 2026', () {
       final date = DateTime(2026, 4, 4);
       final generatedId = HealthSyncService.generateDailyId(date);
-      
+
       expect(generatedId, 20260404);
     });
-    
+
     test('generateDailyId must correctly pad single digit months and days', () {
       final date = DateTime(2026, 1, 9);
       final generatedId = HealthSyncService.generateDailyId(date);
-      
+
       expect(generatedId, 20260109);
     });
 
@@ -22,7 +45,7 @@ void main() {
       // 5000 * 0.00047 = 2.35 -> rounded to 1 decimal place = 2.4
       final miles = HealthSyncService.calculateMiles(5000);
       expect(miles, 2.4);
-      
+
       // 10000 * 0.00047 = 4.7
       final miles2 = HealthSyncService.calculateMiles(10000);
       expect(miles2, 4.7);
@@ -32,13 +55,14 @@ void main() {
       // 5000 * 0.04 = 200
       final calories = HealthSyncService.calculateCalories(5000);
       expect(calories, 200);
-      
+
       // 1234 * 0.04 = 49.36 -> 49
       final calories2 = HealthSyncService.calculateCalories(1234);
       expect(calories2, 49);
     });
 
-    test('selectDeviceDailyStepTotal prefers phone steps over Fitbit totals', () {
+    test('selectDeviceDailyStepTotal prefers phone steps over Fitbit totals',
+        () {
       final points = [
         _stepPoint(
           steps: 1900,
