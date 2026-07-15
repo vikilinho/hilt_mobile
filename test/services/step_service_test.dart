@@ -14,7 +14,9 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import '../support/isar_test_bootstrap.dart';
 
 // Mock PathProvider so Isar can be opened
-class MockPathProviderPlatform extends Fake with MockPlatformInterfaceMixin implements PathProviderPlatform {
+class MockPathProviderPlatform extends Fake
+    with MockPlatformInterfaceMixin
+    implements PathProviderPlatform {
   @override
   Future<String?> getApplicationDocumentsPath() async {
     return Directory.systemTemp.path;
@@ -35,14 +37,13 @@ class _NullStreamHandler implements MockStreamHandler {
   void onCancel(Object? arguments) {}
 }
 
-
-
 void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     PathProviderPlatform.instance = MockPathProviderPlatform();
 
-    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
     // Mock permission_handler: always granted
     messenger.setMockMethodCallHandler(
@@ -91,15 +92,15 @@ void main() {
         name: 'step_service_test_${DateTime.now().microsecondsSinceEpoch}',
       );
       repo = SessionRepository(isar);
-      
+
       mockManager = MockWorkoutManager();
       when(() => mockManager.repo).thenReturn(repo);
 
       stepService = StepService();
-      
+
       // Inject db dependency
       stepService.updateDependencies(mockManager);
-      
+
       // Wait for async Isar refresh logic
       await Future.delayed(const Duration(milliseconds: 100));
 
@@ -127,56 +128,63 @@ void main() {
 
     test('Simulate accelerometer reading < 1.2G -> ignores steps', () async {
       // Inject < 1.2G event
-      mockAccelStream.add(AccelerometerEvent(0, 0, 9.81 * 0.5, DateTime.now())); // 0.5 G
-      
+      mockAccelStream
+          .add(AccelerometerEvent(0, 0, 9.81 * 0.5, DateTime.now())); // 0.5 G
+
       await Future.delayed(const Duration(milliseconds: 50));
-      
+
       // Inject fake pedometer step count
       mockStepStream.add(getMockStep(5));
-      
+
       await Future.delayed(const Duration(milliseconds: 50));
-      
+
       expect(stepService.dailySteps, 0);
     });
 
     test('Simulate accelerometer reading > 2.5G -> ignores steps', () async {
       // Inject > 2.5G event (Violent shaking)
-      mockAccelStream.add(AccelerometerEvent(0, 0, 9.81 * 5.0, DateTime.now())); // 5.0 G
-      
+      mockAccelStream
+          .add(AccelerometerEvent(0, 0, 9.81 * 5.0, DateTime.now())); // 5.0 G
+
       await Future.delayed(const Duration(milliseconds: 50));
-      
+
       // Inject fake step (delta 1)
       mockStepStream.add(getMockStep(1));
-      
+
       await Future.delayed(const Duration(milliseconds: 50));
-      
+
       // Should completely block it
       expect(stepService.dailySteps, 0);
     });
 
-    test('Simulate rhythmic 1.8g pulse -> buffer triggers after 8 steps', () async {
+    test('Simulate rhythmic 1.8g pulse -> buffer triggers after 8 steps',
+        () async {
       // Simulate 8 rhythmic steps
       for (int i = 1; i <= 8; i++) {
         // Send a 1.8G peak
-        mockAccelStream.add(AccelerometerEvent(0, 0, 9.81 * 1.8, DateTime.now()));
+        mockAccelStream
+            .add(AccelerometerEvent(0, 0, 9.81 * 1.8, DateTime.now()));
 
         await Future.delayed(const Duration(milliseconds: 50));
-        
+
         // Pedometer registers it
         mockStepStream.add(getMockStep(i));
-        
+
         await Future.delayed(const Duration(milliseconds: 50));
-        
+
         // Validation: Should remain 0 until the 8th step!
         if (i < 8) {
-          expect(stepService.dailySteps, 0, reason: 'Failed buffering at step $i');
+          expect(stepService.dailySteps, 0,
+              reason: 'Failed buffering at step $i');
         } else {
-          expect(stepService.dailySteps, 8, reason: 'Failed graduating 8 steps');
+          expect(stepService.dailySteps, 8,
+              reason: 'Failed graduating 8 steps');
         }
       }
     });
 
-    test('External step sync seeds the day and live sensor steps continue', () async {
+    test('External step sync seeds the day and live sensor steps continue',
+        () async {
       await stepService.setExternalDailySteps(1000);
       expect(stepService.dailySteps, 1000);
 
@@ -189,7 +197,29 @@ void main() {
       expect(stepService.dailySteps, 1010);
     });
 
-    test('First raw sensor value displays immediately when no health total is available', () async {
+    test('App update startup preserves restored same-day steps', () async {
+      await repo.saveUserStats(
+        UserStats()
+          ..dailySteps = 6321
+          ..startOfDaySteps = 4000
+          ..lastResetDate = DateTime.now(),
+      );
+
+      final restoredService = StepService();
+      restoredService.updateDependencies(mockManager);
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      expect(restoredService.dailySteps, 6321);
+      await restoredService.setExternalDailySteps(0);
+      expect(restoredService.dailySteps, 6321);
+      await restoredService.setExternalDailySteps(2100);
+      expect(restoredService.dailySteps, 6321);
+      restoredService.dispose();
+    });
+
+    test(
+        'First raw sensor value displays immediately when no health total is available',
+        () async {
       mockStepStream.add(getMockStep(1900));
       await Future.delayed(const Duration(milliseconds: 50));
 
@@ -200,14 +230,17 @@ void main() {
       expect(stepService.dailySteps, 1910);
     });
 
-    test('First raw sensor value at goal is not treated as today steps', () async {
+    test('First raw sensor value at goal is not treated as today steps',
+        () async {
       mockStepStream.add(getMockStep(10000));
       await Future.delayed(const Duration(milliseconds: 50));
 
       expect(stepService.dailySteps, 0);
     });
 
-    test('External step sync can correct a stale persisted value before first sensor event', () async {
+    test(
+        'External step sync can correct a stale persisted value before first sensor event',
+        () async {
       stepService.dailySteps = 10000;
 
       await stepService.setExternalDailySteps(1900);
@@ -222,7 +255,9 @@ void main() {
       expect(stepService.dailySteps, 1910);
     });
 
-    test('External step sync can correct stale value after first sensor anchor event', () async {
+    test(
+        'External step sync can correct stale value after first sensor anchor event',
+        () async {
       await stepService.setExternalDailySteps(10000);
       expect(stepService.dailySteps, 10000);
 
@@ -238,7 +273,9 @@ void main() {
       expect(stepService.dailySteps, 1910);
     });
 
-    test('External seed keeps live updates when raw sensor total is lower than daily total', () async {
+    test(
+        'External seed keeps live updates when raw sensor total is lower than daily total',
+        () async {
       await stepService.setExternalDailySteps(1900);
       expect(stepService.dailySteps, 1900);
 
@@ -251,7 +288,8 @@ void main() {
       expect(stepService.dailySteps, 1910);
     });
 
-    test('External sync is ignored after live sensor has started for the day', () async {
+    test('External sync is ignored after live sensor has started for the day',
+        () async {
       await stepService.setExternalDailySteps(1000);
       mockStepStream.add(getMockStep(5000));
       await Future.delayed(const Duration(milliseconds: 50));

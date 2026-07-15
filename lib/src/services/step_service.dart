@@ -41,13 +41,33 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
   bool _hasProcessedSensorEventToday = false;
   bool _hasLiveSensorIncrementToday = false;
   bool _usingRawSensorAsTodayEstimate = false;
+  bool _restoredPersistedStepsToday = false;
 
   Future<void> setExternalDailySteps(int steps) async {
     if (_repo == null) return;
     _userStats ??= await _repo!.getUserStats();
     if (_userStats == null) return;
 
-    final normalizedSteps = math.max(0, steps);
+    var normalizedSteps = math.max(0, steps);
+
+    // App updates restart the process while today's persisted total is still
+    // valid. Health Sync can race this service's sensor initialization and
+    // briefly report zero or a partial total. Never let that startup value
+    // move a same-day persisted counter backwards.
+    final lastReset = _userStats!.lastResetDate;
+    final now = DateTime.now();
+    final isSameDay = lastReset != null &&
+        lastReset.year == now.year &&
+        lastReset.month == now.month &&
+        lastReset.day == now.day;
+    if (isSameDay &&
+        _restoredPersistedStepsToday &&
+        !_hasLiveSensorIncrementToday) {
+      normalizedSteps = math.max(
+        normalizedSteps,
+        math.max(_userStats!.dailySteps, _currentSteps),
+      );
+    }
 
     // Once the live sensor has actually added steps, Health totals should not
     // keep fighting the counter. A first raw sensor event is only an anchor.
@@ -74,7 +94,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
     _currentSteps = normalizedSteps;
     if (_userStats != null && _repo != null) {
       _userStats!.dailySteps = normalizedSteps;
-      _userStats!.lastResetDate = DateTime.now();
+      _userStats!.lastResetDate = now;
       await _repo!.saveUserStats(_userStats!);
     }
     _publish();
@@ -280,6 +300,13 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
     // 1. Immediately load the persisted state so the UI snaps to the correct steps in 0ms.
     final persisted = _userStats?.dailySteps ?? 0;
+    final lastReset = _userStats?.lastResetDate;
+    final now = DateTime.now();
+    _restoredPersistedStepsToday = persisted > 0 &&
+        lastReset != null &&
+        lastReset.year == now.year &&
+        lastReset.month == now.month &&
+        lastReset.day == now.day;
     debugPrint(
       '[StepService] Loaded stats: persisted=$persisted anchor=${_userStats?.startOfDaySteps} lastReset=${_userStats?.lastResetDate}',
     );

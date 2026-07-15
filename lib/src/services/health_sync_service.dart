@@ -208,16 +208,28 @@ class HealthSyncService {
   }
 
   Future<void> _saveToIsar(int id, DateTime midnight, int steps) async {
+    final existing = await _isar!.dailyActivitys.get(id);
+    final preservedSteps = preserveHighestSameDayTotal(
+      existing?.totalSteps ?? 0,
+      steps,
+    );
     final activity = DailyActivity()
       ..id = id
       ..date = midnight
-      ..totalSteps = steps
-      ..miles = calculateMiles(steps)
-      ..calories = calculateCalories(steps);
+      ..totalSteps = preservedSteps
+      ..miles = calculateMiles(preservedSteps)
+      ..calories = calculateCalories(preservedSteps);
 
     await _isar!.writeTxn(() async {
       await _isar!.dailyActivitys.put(activity);
     });
+  }
+
+  @visibleForTesting
+  static int preserveHighestSameDayTotal(int persisted, int incoming) {
+    final safePersisted = persisted < 0 ? 0 : persisted;
+    final safeIncoming = incoming < 0 ? 0 : incoming;
+    return safeIncoming > safePersisted ? safeIncoming : safePersisted;
   }
 
   Future<void> _fallbackToHardwareSensor(int id, DateTime midnight) async {
