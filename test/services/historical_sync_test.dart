@@ -1,17 +1,17 @@
 import 'dart:io';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:isar_community/isar.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../support/isar_test_bootstrap.dart';
 
 void main() {
   late Isar isar;
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    await Isar.initializeIsarCore(download: true);
+    await initializeTestIsarCore();
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -46,9 +46,17 @@ void main() {
       // Simulated 10PM scenario: difference must cover at least 20 hours
       // In real test conditions the 'now' may be any time,  so just verify:
       // if it were 22:00, the delta would be ≥ 20 hours.
-      final simulatedEvening = DateTime(now.year, now.month, now.day, 22, 0);
+      const simulatedEveningHour = 22;
+      final simulatedEvening = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        simulatedEveningHour,
+        0,
+      );
       final delta = simulatedEvening.difference(midnight).inHours;
-      expect(delta, 22, reason: 'A 10 PM query must reach back exactly 22 hours to midnight');
+      expect(delta, simulatedEveningHour,
+          reason: 'A 10 PM query must reach back exactly 22 hours to midnight');
     });
 
     test('DailyActivity is updated with OS-reported total steps, not hardware delta', () async {
@@ -95,7 +103,7 @@ void main() {
       const currentSteps = 3200;
 
       // UI should never show MATCH READY below step goal
-      final isMatchReady = currentSteps >= stepGoal;
+      const isMatchReady = currentSteps >= stepGoal;
       expect(isMatchReady, isFalse,
           reason: '"MATCH READY" label must not appear below the step goal');
     });
@@ -104,7 +112,7 @@ void main() {
       const stepGoal = 10000;
       const currentSteps = 0;
 
-      final isMatchReady = currentSteps >= stepGoal;
+      const isMatchReady = currentSteps >= stepGoal;
       expect(isMatchReady, isFalse,
           reason: '"MATCH READY" label must not appear at zero steps (fresh install)');
     });

@@ -1,7 +1,7 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:hilt_core/hilt_core.dart';
+import '../l10n/app_localizations.dart';
 
 class HistoryItemCard extends StatelessWidget {
   final WorkoutSession session;
@@ -85,7 +85,7 @@ class HistoryItemCard extends StatelessWidget {
                               ),
                               alignment: Alignment.center, // Center text
                               child: Text(
-                                _deriveSessionLabel(session),
+                                _deriveSessionLabel(context, session),
                                 style: theme.textTheme.labelSmall?.copyWith(
                                   fontWeight: FontWeight.bold, // Bold
                                   color: Colors.white, // White text
@@ -126,15 +126,19 @@ class HistoryItemCard extends StatelessWidget {
                                   ? Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                                       children: [
-                                        _buildStat(context, "TOTAL STEPS", "${session.steps ?? 0}"),
+                                        _buildStat(
+                                          context,
+                                          context.l10n.text('totalStepsLabel').toUpperCase(),
+                                          "${session.steps ?? 0}",
+                                        ),
                                       ],
                                     )
                                   : Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                                       children: [
-                                        _buildStat(context, "AVG BPM", _sanitizeBpm(session.averageBpm)),
-                                        _buildStat(context, "PEAK", "${_sanitizeInt(session.peakBpm)}"),
-                                        _buildStat(context, "IN ZONE", _formatDuration(session.timeInTargetZone)),
+                                        _buildStat(context, context.l10n.text('avgBpm'), _sanitizeBpm(session.averageBpm)),
+                                        _buildStat(context, context.l10n.text('peakLabel').toUpperCase(), "${_sanitizeInt(session.peakBpm)}"),
+                                        _buildStat(context, context.l10n.text('inZone').toUpperCase(), _formatDuration(session.timeInTargetZone)),
                                       ],
                                     ),
                             ),
@@ -200,26 +204,26 @@ class HistoryItemCard extends StatelessWidget {
     return session.comboNames?.contains('Daily Steps') ?? false;
   }
 
-  String _deriveSessionLabel(WorkoutSession session) {
-    if (_isStepSession(session)) return "DAILY STEPS";
+  String _deriveSessionLabel(BuildContext context, WorkoutSession session) {
+    if (_isStepSession(session)) {
+      return AppLocalizations.of(context).text('dailySteps').toUpperCase();
+    }
     
     // 1. If we have a Strength Score, it was a Strength Session
     if (_isStrengthSession(session)) {
-      return "STRENGTH";
+      return AppLocalizations.of(context).text('strength').toUpperCase();
     }
 
     // 2. Otherwise map SportType to meaningful labels
     switch (session.sportType) {
       case SportType.cycling:
-        return "CYCLING";
+        return AppLocalizations.of(context).text('cycling').toUpperCase();
       case SportType.boxing:
-        return "BOXING";
+        return AppLocalizations.of(context).text('boxing').toUpperCase();
       case SportType.custom:
-        return "TRAINING";
+        return AppLocalizations.of(context).text('training').toUpperCase();
       case SportType.football:
-      default:
-        // User requested "Cardio" for non-strength
-        return "CARDIO";
+        return AppLocalizations.of(context).text('cardio').toUpperCase();
     }
   }
 

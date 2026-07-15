@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
+import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import '../workout_manager.dart';
+import 'app_permission_gate.dart';
 
 class MagEvent {
   final DateTime time;
@@ -15,6 +17,8 @@ class MagEvent {
 }
 
 class StepService extends ChangeNotifier with WidgetsBindingObserver {
+  static const int _minimumProvisionalRawSteps = 100;
+
   SessionRepository? _repo;
   UserStats? _userStats;
   StreamSubscription<StepCount>? _stepSubscription;
@@ -26,8 +30,6 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
   int _currentSteps = 0;
   int get dailySteps => _currentSteps;
-  bool _preferExternalStepTotal = false;
-  
   @visibleForTesting
   set dailySteps(int steps) => _currentSteps = steps;
   int get stepGoal => _userStats?.stepGoal ?? 10000;
@@ -35,22 +37,52 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
   WorkoutManager? _workoutManager;
   int _lastRawSensorTotal = 0;
+  int? _pendingExternalSeedSteps;
+  bool _hasProcessedSensorEventToday = false;
+  bool _hasLiveSensorIncrementToday = false;
+  bool _usingRawSensorAsTodayEstimate = false;
 
   Future<void> setExternalDailySteps(int steps) async {
-    _preferExternalStepTotal = true;
-    if (_currentSteps == steps) return;
+    if (_repo == null) return;
+    _userStats ??= await _repo!.getUserStats();
+    if (_userStats == null) return;
 
-    _currentSteps = steps;
+    final normalizedSteps = math.max(0, steps);
+
+    // Once the live sensor has actually added steps, Health totals should not
+    // keep fighting the counter. A first raw sensor event is only an anchor.
+    if (_hasLiveSensorIncrementToday) {
+      debugPrint(
+        '[StepService] Ignoring external daily total after live sensor increment: $normalizedSteps',
+      );
+      return;
+    }
+
+    if (_currentSteps == normalizedSteps &&
+        _pendingExternalSeedSteps == normalizedSteps) {
+      return;
+    }
+
+    if (_hasProcessedSensorEventToday && _lastRawSensorTotal > 0) {
+      _pendingExternalSeedSteps = null;
+      _userStats!.startOfDaySteps = _lastRawSensorTotal - normalizedSteps;
+      _usingRawSensorAsTodayEstimate = false;
+    } else {
+      _pendingExternalSeedSteps = normalizedSteps;
+    }
+
+    _currentSteps = normalizedSteps;
     if (_userStats != null && _repo != null) {
-      _userStats!.dailySteps = steps;
-      _userStats!.lastResetDate ??= DateTime.now();
+      _userStats!.dailySteps = normalizedSteps;
+      _userStats!.lastResetDate = DateTime.now();
       await _repo!.saveUserStats(_userStats!);
     }
     _publish();
   }
 
   void clearExternalDailyStepsPreference() {
-    _preferExternalStepTotal = false;
+    // Health totals are now treated as a baseline sync rather than an exclusive
+    // source, so there is no live lock state to clear here.
   }
 
   // ---------------------------------------------------------------------------
@@ -82,65 +114,114 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _startAccelerometerStream();
-      _refreshFromIsar();
-      _checkMidnightReset();
-      _workoutManager?.refreshHistory();
+      unawaited(_resumeTrackingAfterForeground());
     }
   }
 
   Future<void> _initService() async {
     if (_repo == null) return;
 
-    if (await Permission.activityRecognition.isDenied) {
-      await Permission.activityRecognition.request();
+    debugPrint('[StepService] Initializing step service.');
+    final sensorAccessGranted =
+        await _ensureActivityRecognitionPermission(interactive: true);
+    debugPrint(
+        '[StepService] Activity recognition access: $sensorAccessGranted');
+    if (sensorAccessGranted) {
+      _startSensorStreams();
     }
-
-    _startSensorStreams();
     await _refreshFromIsar();
   }
 
+  Future<void> _resumeTrackingAfterForeground() async {
+    final sensorAccessGranted =
+        await _ensureActivityRecognitionPermission(interactive: false);
+    if (sensorAccessGranted) {
+      _startSensorStreams();
+    }
+    _refreshFromIsar();
+    _checkMidnightReset();
+    _workoutManager?.refreshHistory();
+  }
+
+  Future<bool> _ensureActivityRecognitionPermission({
+    required bool interactive,
+  }) async {
+    if (!Platform.isAndroid) {
+      return true;
+    }
+
+    final currentStatus = await Permission.activityRecognition.status;
+    if (currentStatus.isGranted) {
+      return true;
+    }
+
+    if (!interactive) {
+      return false;
+    }
+
+    final requestedStatus = await AppPermissionGate.request(
+      Permission.activityRecognition,
+      label: 'activity recognition',
+    );
+    if (!requestedStatus.isGranted) {
+      debugPrint(
+        '[StepService] Activity recognition permission not granted.',
+      );
+      return false;
+    }
+
+    return true;
+  }
+
   void _startSensorStreams() {
+    debugPrint('[StepService] Starting pedometer and accelerometer streams.');
     _stepSubscription?.cancel();
     _accelSubscription?.cancel();
 
     _checkMidnightReset();
 
-    _stepSubscription = (_stepStreamOverride ?? Pedometer.stepCountStream).listen((StepCount event) {
+    _stepSubscription = (_stepStreamOverride ?? Pedometer.stepCountStream)
+        .listen((StepCount event) {
+      debugPrint('[StepService] Raw pedometer total: ${event.steps}');
       _handleNewSensorValue(event.steps);
     }, onError: (error) {
       debugPrint('[StepService] Sensor error: $error');
     });
 
-    _accelSubscription = (_accelStreamOverride ?? accelerometerEventStream()).listen((event) {
-        final now = DateTime.now();
-        final mag = math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z) / 9.81;
+    _accelSubscription =
+        (_accelStreamOverride ?? accelerometerEventStream()).listen((event) {
+      final now = DateTime.now();
+      final mag =
+          math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z) /
+              9.81;
 
-        _recentMagnitudes.add(MagEvent(now, mag));
+      _recentMagnitudes.add(MagEvent(now, mag));
 
-        // Peak Detection
-        if (_lastMag > _lastLastMag && _lastMag > mag && _lastMag > 1.2) {
-          _recentPeaks.add(now);
-        }
+      // Peak Detection
+      if (_lastMag > _lastLastMag && _lastMag > mag && _lastMag > 1.2) {
+        _recentPeaks.add(now);
+      }
 
-        _lastLastMag = _lastMag;
-        _lastMag = mag;
+      _lastLastMag = _lastMag;
+      _lastMag = mag;
 
-        // Sliding windows pruning
-        final magCutoff = now.subtract(const Duration(milliseconds: 1500));
-        while (_recentMagnitudes.isNotEmpty && _recentMagnitudes.first.time.isBefore(magCutoff)) {
-          _recentMagnitudes.removeFirst();
-        }
+      // Sliding windows pruning
+      final magCutoff = now.subtract(const Duration(milliseconds: 1500));
+      while (_recentMagnitudes.isNotEmpty &&
+          _recentMagnitudes.first.time.isBefore(magCutoff)) {
+        _recentMagnitudes.removeFirst();
+      }
 
-        final peakCutoff = now.subtract(const Duration(seconds: 1));
-        while (_recentPeaks.isNotEmpty && _recentPeaks.first.isBefore(peakCutoff)) {
-          _recentPeaks.removeFirst();
-        }
+      final peakCutoff = now.subtract(const Duration(seconds: 1));
+      while (
+          _recentPeaks.isNotEmpty && _recentPeaks.first.isBefore(peakCutoff)) {
+        _recentPeaks.removeFirst();
+      }
 
-        // 4Hz Frequency Cutoff Loop Protector
-        if (_recentPeaks.length > 4) {
-          _shakePauseUntil = now.add(const Duration(seconds: 5));
-        }
+      // 4Hz Frequency Cutoff Loop Protector
+      if (_recentPeaks.length > 4) {
+        _shakePauseUntil = now.add(const Duration(seconds: 5));
+      }
     });
   }
 
@@ -155,47 +236,6 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
     _stepStreamOverride = steps;
     _accelStreamOverride = accel;
     _startSensorStreams();
-  }
-
-
-
-  // ---------------------------------------------------------------------------
-  // ACCELEROMETER STREAM (GAIT VALIDATOR)
-  // ---------------------------------------------------------------------------
-  void _startAccelerometerStream() {
-    _accelSubscription?.cancel();
-    _accelSubscription = accelerometerEventStream().listen((event) {
-      final now = DateTime.now();
-      final mag = math.sqrt(event.x * event.x + event.y * event.y + event.z * event.z) / 9.81;
-
-      _recentMagnitudes.add(MagEvent(now, mag));
-
-      // Peak Detection
-      if (_lastMag > _lastLastMag && _lastMag > mag && _lastMag > 1.2) {
-        _recentPeaks.add(now);
-      }
-
-      _lastLastMag = _lastMag;
-      _lastMag = mag;
-
-      // Sliding windows pruning
-      final magCutoff = now.subtract(const Duration(milliseconds: 1500));
-      while (_recentMagnitudes.isNotEmpty && _recentMagnitudes.first.time.isBefore(magCutoff)) {
-        _recentMagnitudes.removeFirst();
-      }
-
-      final peakCutoff = now.subtract(const Duration(seconds: 1));
-      while (_recentPeaks.isNotEmpty && _recentPeaks.first.isBefore(peakCutoff)) {
-        _recentPeaks.removeFirst();
-      }
-
-      // 4Hz Frequency Cutoff Loop Protector
-      if (_recentPeaks.length > 4) {
-        _shakePauseUntil = now.add(const Duration(seconds: 5));
-      }
-    }, onError: (e) {
-      debugPrint('[StepService] Accel error: $e');
-    });
   }
 
   bool _validateWithAccelerometer() {
@@ -237,13 +277,20 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _refreshFromIsar() async {
     if (_repo == null) return;
     _userStats = await _repo!.getUserStats();
-    
+
     // 1. Immediately load the persisted state so the UI snaps to the correct steps in 0ms.
     final persisted = _userStats?.dailySteps ?? 0;
+    debugPrint(
+      '[StepService] Loaded stats: persisted=$persisted anchor=${_userStats?.startOfDaySteps} lastReset=${_userStats?.lastResetDate}',
+    );
     if (persisted != _currentSteps) {
       _currentSteps = persisted;
       _publish();
     }
+    _pendingExternalSeedSteps = null;
+    _hasProcessedSensorEventToday = false;
+    _hasLiveSensorIncrementToday = false;
+    _usingRawSensorAsTodayEstimate = false;
 
     // 2. Initialize the background delta anchor mathematically without waiting for the sensor.
     final anchor = _userStats?.startOfDaySteps ?? 0;
@@ -264,26 +311,73 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
         if (!nowDay.isAtSameMomentAs(lastDay)) {
           _userStats!.lastResetDate = now;
+          _hasProcessedSensorEventToday = false;
+          _hasLiveSensorIncrementToday = false;
+          _usingRawSensorAsTodayEstimate = false;
+          _pendingExternalSeedSteps = null;
           await _handleDayChange(lastDay, nowDay, now, rawSensorTotal);
           _lastRawSensorTotal = rawSensorTotal;
           return;
         }
       } else {
-        _currentSteps = 0;
-        _userStats!.dailySteps = 0;
+        final useRawEstimate = _pendingExternalSeedSteps == null &&
+            _isReasonableProvisionalRawTotal(rawSensorTotal);
+        final initialSteps =
+            _pendingExternalSeedSteps ?? (useRawEstimate ? rawSensorTotal : 0);
+        _currentSteps = initialSteps;
+        _userStats!.dailySteps = initialSteps;
         _userStats!.lastResetDate = now;
-        _userStats!.startOfDaySteps = rawSensorTotal;
+        _userStats!.startOfDaySteps = rawSensorTotal - initialSteps;
         await _repo!.saveUserStats(_userStats!);
         _lastRawSensorTotal = rawSensorTotal;
+        _hasProcessedSensorEventToday = true;
+        _hasLiveSensorIncrementToday = false;
+        _usingRawSensorAsTodayEstimate = useRawEstimate;
+        _pendingExternalSeedSteps = null;
         _publish();
         return;
       }
 
-      if (_userStats!.startOfDaySteps == 0 && rawSensorTotal > 0) {
-        int newAnchor = rawSensorTotal - _userStats!.dailySteps;
-        if (newAnchor < 0) newAnchor = 0;
-        _userStats!.startOfDaySteps = newAnchor;
+      if (_pendingExternalSeedSteps != null && rawSensorTotal > 0) {
+        final seededSteps = _pendingExternalSeedSteps!;
+        final seededAnchor = rawSensorTotal - seededSteps;
+
+        _userStats!.startOfDaySteps = seededAnchor;
+        _userStats!.dailySteps = seededSteps;
+        _userStats!.lastResetDate = now;
         await _repo!.saveUserStats(_userStats!);
+
+        _lastRawSensorTotal = rawSensorTotal;
+        _hasProcessedSensorEventToday = true;
+        _hasLiveSensorIncrementToday = false;
+        _usingRawSensorAsTodayEstimate = false;
+        _pendingExternalSeedSteps = null;
+        return;
+      }
+
+      _hasProcessedSensorEventToday = true;
+
+      if (_userStats!.startOfDaySteps == 0 &&
+          rawSensorTotal > 0 &&
+          !_usingRawSensorAsTodayEstimate) {
+        if (_userStats!.dailySteps == 0 &&
+            _currentSteps == 0 &&
+            _isReasonableProvisionalRawTotal(rawSensorTotal)) {
+          _currentSteps = rawSensorTotal;
+          _userStats!.dailySteps = rawSensorTotal;
+          _userStats!.lastResetDate = now;
+          _lastRawSensorTotal = rawSensorTotal;
+          _usingRawSensorAsTodayEstimate = true;
+          await _repo!.saveUserStats(_userStats!);
+          await _saveTodayActivity(now, rawSensorTotal);
+          _publish();
+          return;
+        } else {
+          final newAnchor = rawSensorTotal - _userStats!.dailySteps;
+          _userStats!.startOfDaySteps = newAnchor;
+          _usingRawSensorAsTodayEstimate = false;
+          await _repo!.saveUserStats(_userStats!);
+        }
       }
 
       // --- GAIT VALIDATION LOGIC ---
@@ -324,8 +418,8 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
             dbNeedsUpdate = true;
 
             final cutoff = now.subtract(const Duration(seconds: 12));
-            while (_stepBuffer.isNotEmpty &&
-                _stepBuffer.first.isBefore(cutoff)) {
+            while (
+                _stepBuffer.isNotEmpty && _stepBuffer.first.isBefore(cutoff)) {
               _stepBuffer.removeFirst();
             }
 
@@ -349,9 +443,12 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       int stepDelta = 0;
-      if (!_preferExternalStepTotal && displaySteps != _currentSteps) {
+      if (displaySteps != _currentSteps) {
         stepDelta = displaySteps - _currentSteps;
         _currentSteps = displaySteps;
+        if (stepDelta > 0) {
+          _hasLiveSensorIncrementToday = true;
+        }
         _userStats!.dailySteps = _currentSteps;
         _userStats!.lastResetDate = now;
         dbNeedsUpdate = true;
@@ -360,26 +457,8 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
       if (dbNeedsUpdate) {
         await _repo!.saveUserStats(_userStats!);
-        if (!_preferExternalStepTotal && stepDelta > 0 && _repo != null) {
-          final naturalId = int.parse(
-              "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}");
-          final midnight = DateTime(now.year, now.month, now.day);
-
-          await _repo!.isar.writeTxn(() async {
-            final existing = await _repo!.isar.dailyActivitys.get(naturalId);
-            final updatedSteps = (existing?.totalSteps ?? _currentSteps) +
-                stepDelta;
-
-            final activity = DailyActivity()
-              ..id = naturalId
-              ..date = midnight
-              ..totalSteps = updatedSteps
-              ..miles =
-                  double.parse((updatedSteps * 0.00047).toStringAsFixed(1))
-              ..calories = (updatedSteps * 0.04).toInt();
-
-            await _repo!.isar.dailyActivitys.put(activity);
-          });
+        if (stepDelta > 0 && _repo != null) {
+          await _saveTodayActivity(now, _currentSteps);
         }
       }
     } catch (e) {
@@ -388,7 +467,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ---------------------------------------------------------------------------
-  // MIDNIGHT RESET & ARCHIVE 
+  // MIDNIGHT RESET & ARCHIVE
   // ---------------------------------------------------------------------------
   void _startMidnightChecker() {
     _midnightCheckTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -407,7 +486,7 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
       if (!nowDay.isAtSameMomentAs(lastDay)) {
         _userStats!.lastResetDate = now;
-        _handleDayChange(lastDay, nowDay, now, null);
+        _handleDayChange(lastDay, nowDay, now, _lastRawSensorTotal);
       }
     } else if (lastReset == null) {
       _userStats!.lastResetDate = now;
@@ -423,15 +502,16 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
     _publish();
   }
 
-  Future<void> _handleDayChange(
-      DateTime lastDay, DateTime nowDay, DateTime now, int? rawSensorTotal) async {
+  Future<void> _handleDayChange(DateTime lastDay, DateTime nowDay, DateTime now,
+      int? rawSensorTotal) async {
     final archivedSteps = _currentSteps;
 
     if (archivedSteps > 0) {
       final sessions = await _repo!.getAllSessions();
       final existingLastDay = sessions.where((s) {
         if (s.comboNames?.contains('Daily Steps') ?? false) {
-          final d = DateTime(s.timestamp.year, s.timestamp.month, s.timestamp.day);
+          final d =
+              DateTime(s.timestamp.year, s.timestamp.month, s.timestamp.day);
           return d.isAtSameMomentAs(lastDay);
         }
         return false;
@@ -439,15 +519,19 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
       if (existingLastDay != null) {
         existingLastDay.steps = archivedSteps;
-        existingLastDay.distance = double.parse((archivedSteps * 0.00047).toStringAsFixed(1));
-        existingLastDay.calories = double.parse((archivedSteps * 0.04).toStringAsFixed(1));
+        existingLastDay.distance =
+            double.parse((archivedSteps * 0.00047).toStringAsFixed(1));
+        existingLastDay.calories =
+            double.parse((archivedSteps * 0.04).toStringAsFixed(1));
         await _repo!.saveSession(existingLastDay);
       } else {
         final session = WorkoutSession()
-          ..timestamp = DateTime(lastDay.year, lastDay.month, lastDay.day, 23, 59)
+          ..timestamp =
+              DateTime(lastDay.year, lastDay.month, lastDay.day, 23, 59)
           ..sportType = SportType.custom
           ..steps = archivedSteps
-          ..distance = double.parse((archivedSteps * 0.00047).toStringAsFixed(1))
+          ..distance =
+              double.parse((archivedSteps * 0.00047).toStringAsFixed(1))
           ..calories = double.parse((archivedSteps * 0.04).toStringAsFixed(1))
           ..heartRateReadings = []
           ..averageBpm = 0
@@ -463,7 +547,8 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
     final sessions = await _repo!.getAllSessions();
     final existingIncomingDay = sessions.where((s) {
       if (s.comboNames?.contains('Daily Steps') ?? false) {
-        final d = DateTime(s.timestamp.year, s.timestamp.month, s.timestamp.day);
+        final d =
+            DateTime(s.timestamp.year, s.timestamp.month, s.timestamp.day);
         return d.isAtSameMomentAs(nowDay);
       }
       return false;
@@ -471,13 +556,16 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
 
     if (existingIncomingDay != null) {
       _currentSteps = existingIncomingDay.steps ?? 0;
-      _userStats!.startOfDaySteps = 0; 
-      await _repo!.deleteSession(existingIncomingDay.id);
+      _userStats!.startOfDaySteps = 0;
     } else {
       _currentSteps = 0;
       _userStats!.startOfDaySteps = rawSensorTotal ?? 0;
     }
 
+    _hasProcessedSensorEventToday = false;
+    _hasLiveSensorIncrementToday = false;
+    _usingRawSensorAsTodayEstimate = false;
+    _pendingExternalSeedSteps = null;
     _userStats!.dailySteps = _currentSteps;
     _userStats!.lastResetDate = now;
     await _repo!.saveUserStats(_userStats!);
@@ -490,6 +578,32 @@ class StepService extends ChangeNotifier with WidgetsBindingObserver {
       _stepsController.add(_currentSteps);
     }
     notifyListeners();
+  }
+
+  Future<void> _saveTodayActivity(DateTime now, int steps) async {
+    if (_repo == null) return;
+
+    final naturalId = int.parse(
+      "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}",
+    );
+    final midnight = DateTime(now.year, now.month, now.day);
+
+    await _repo!.isar.writeTxn(() async {
+      final activity = DailyActivity()
+        ..id = naturalId
+        ..date = midnight
+        ..totalSteps = steps
+        ..miles = double.parse((steps * 0.00047).toStringAsFixed(1))
+        ..calories = (steps * 0.04).toInt();
+
+      await _repo!.isar.dailyActivitys.put(activity);
+    });
+  }
+
+  bool _isReasonableProvisionalRawTotal(int rawSensorTotal) {
+    final goal = stepGoal;
+    return rawSensorTotal >= _minimumProvisionalRawSteps &&
+        (goal <= 0 || rawSensorTotal < goal);
   }
 
   @override

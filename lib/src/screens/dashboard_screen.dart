@@ -1,19 +1,32 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:hilt_core/hilt_core.dart';
-import '../workout_manager.dart';
-import '../services/step_service.dart';
-
-import '../services/bike_connector_service.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:hilt_core/hilt_core.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+
+import '../l10n/app_localizations.dart';
+import '../services/bike_connector_service.dart';
+import '../services/step_service.dart';
 import '../widgets/heart_rate_pulse.dart';
 import '../widgets/strength_visual_guide.dart'; // Import library
 import '../widgets/equipment_selector.dart';
+import '../workout_manager.dart';
 import 'post_workout_screen.dart';
 import 'camera_bpm_screen.dart';
 import 'package:confetti/confetti.dart';
+
+String strengthSetProgressLabel({
+  required AppLocalizations l10n,
+  required int completedSets,
+  required int totalSets,
+}) {
+  if (totalSets <= 0) {
+    return "${l10n.text('sessions').toUpperCase()} --";
+  }
+
+  return l10n.setProgress(completedSets, totalSets);
+}
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback?
@@ -47,18 +60,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _onSessionComplete(WorkoutSession session) async {
     if (mounted) {
       final manager = context.read<WorkoutManager>();
-      
+
       if (manager.sessionNeedsManualBpmCapture(session)) {
-         final bpm = await Navigator.of(context).push<int>(MaterialPageRoute(
-             builder: (_) => const CameraBpmScreen(
-                 forced: true,
-                 message: "Hold still while we capture your Peak BPM",
-             )
-         ));
-         if (bpm != null && bpm > 0) {
-             manager.recalculateGrade(session, bpm);
-             await manager.updatePeakBpm(session.id, bpm, grade: session.grade);
-         }
+        final bpm = await Navigator.of(context).push<int>(MaterialPageRoute(
+            builder: (_) => CameraBpmScreen(
+                  forced: true,
+                  message: context.l10n.text('holdStillCapturePeakBpm'),
+        )));
+        if (bpm != null && bpm > 0) {
+          await manager.applyManualBpmToSession(session, bpm);
+        }
       }
 
       if (mounted) {
@@ -113,9 +124,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (manager.isComboSession)
-                      const Text(
-                        "COMBO SESSION",
-                        style: TextStyle(
+                      Text(
+                        context.l10n.text('comboSession').toUpperCase(),
+                        style: const TextStyle(
                             fontSize: 10,
                             color: Colors.grey,
                             fontWeight: FontWeight.bold,
@@ -124,10 +135,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Text(
                       manager.profile.displayName.isNotEmpty
                           ? (manager.profile.gear == GarageGear.treadmill
-                              ? "${manager.profile.displayName} (${manager.profile.blocks.fold(0, (p, b) => p + b.workSeconds * b.iterations + b.restSeconds * b.iterations) ~/ 60}M)"
+                              ? "${context.l10n.content(manager.profile.displayName)} (${manager.profile.blocks.fold(0, (p, b) => p + b.workSeconds * b.iterations + b.restSeconds * b.iterations) ~/ 60}M)"
                                   .toUpperCase()
-                              : manager.profile.displayName)
-                          : 'Workout',
+                              : context.l10n
+                                  .content(manager.profile.displayName))
+                          : context.l10n.text('workout'),
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, color: Colors.black87),
                     ),
@@ -140,14 +152,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   showDialog(
                     context: context,
                     builder: (dialogContext) => AlertDialog(
-                      title: const Text("Stop Workout?"),
-                      content: const Text(
-                        "Do you want to stop this workout?",
-                      ),
+                      title: Text(context.l10n.text('stopWorkoutQuestion')),
+                      content: Text(context.l10n.text('stopWorkoutPrompt')),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(dialogContext),
-                          child: const Text("CANCEL"),
+                          child:
+                              Text(context.l10n.text('cancel').toUpperCase()),
                         ),
                         FilledButton(
                           onPressed: () {
@@ -158,7 +169,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: FilledButton.styleFrom(
                             backgroundColor: Colors.red,
                           ),
-                          child: const Text("STOP WORKOUT"),
+                          child: Text(
+                            context.l10n.text('stopWorkout').toUpperCase(),
+                          ),
                         ),
                       ],
                     ),
@@ -193,7 +206,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             56), // Increased spacing for visual breathing room
 
                     // Bike Integration (Only if Bike is selected and user is in the preparation screen)
-                    if (state == null && manager.hasUserSelectedProfile && profile.gear == GarageGear.bike)
+                    if (state == null &&
+                        manager.hasUserSelectedProfile &&
+                        profile.gear == GarageGear.bike)
                       StreamBuilder(
                         stream: manager.bikeService.statusStream,
                         initialData: manager.bikeService.status,
@@ -208,17 +223,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           return Column(
                             children: [
                               if (isConnected)
-                                const Row(
+                                Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(
+                                    const Icon(
                                       Icons.directions_bike,
                                       color: Colors.green,
                                     ),
-                                    SizedBox(width: 8),
+                                    const SizedBox(width: 8),
                                     Text(
-                                      "BIKE CONNECTED",
-                                      style: TextStyle(
+                                      context.l10n
+                                          .text('bikeConnected')
+                                          .toUpperCase(),
+                                      style: const TextStyle(
                                         color: Colors.green,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -232,8 +249,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       .turnOn(), // Prompt to turn on
                                   icon: const Icon(Icons.bluetooth_disabled,
                                       color: Colors.red),
-                                  label: const Text("ENABLE BLUETOOTH",
-                                      style: TextStyle(color: Colors.red)),
+                                  label: Text(
+                                    context.l10n
+                                        .text('enableBluetooth')
+                                        .toUpperCase(),
+                                    style: const TextStyle(color: Colors.red),
+                                  ),
                                 )
                               else if (status ==
                                   BikeConnectionStatus.unauthorized)
@@ -242,8 +263,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       openAppSettings(), // Open settings
                                   icon: const Icon(Icons.security,
                                       color: Colors.orange),
-                                  label: const Text("GRANT PERMISSIONS",
-                                      style: TextStyle(color: Colors.orange)),
+                                  label: Text(
+                                    context.l10n
+                                        .text('grantPermissions')
+                                        .toUpperCase(),
+                                    style:
+                                        const TextStyle(color: Colors.orange),
+                                  ),
                                 )
                               else
                                 OutlinedButton.icon(
@@ -259,7 +285,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         )
                                       : const Icon(Icons.link),
                                   label: Text(
-                                    isScanning ? "SCANNING..." : "CONNECT BIKE",
+                                    isScanning
+                                        ? context.l10n
+                                            .text('scanning')
+                                            .toUpperCase()
+                                        : context.l10n
+                                            .text('connectBike')
+                                            .toUpperCase(),
                                   ),
                                 ),
                             ],
@@ -299,7 +331,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       state.currentPhaseDuration,
                               strokeWidth: 20,
                               backgroundColor: Colors.grey.shade200,
-                              color: const Color(0xFF43A047), // Always green — tracks lap
+                              color: const Color(
+                                  0xFF43A047), // Always green — tracks lap
                               strokeCap: StrokeCap.round,
                             ),
                           ),
@@ -338,8 +371,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     // If Treadmill layout is active (check manager state/profile)
                     // Using profile.gear check since we are in idle state
                     // If Cardio layout is active
-                    if (!profile.isStrength &&
-                        manager.hasUserSelectedProfile)
+                    if (!profile.isStrength && manager.hasUserSelectedProfile)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 32.0),
                         child: Column(
@@ -351,8 +383,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color:
-                                      const Color(0xFF43A047).withValues(alpha: 0.2),
+                                  color: const Color(0xFF43A047)
+                                      .withValues(alpha: 0.2),
                                   width: 20,
                                 ),
                               ),
@@ -401,7 +433,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               children: [
                                 Text(
                                   _getWeeklyGoalLabel(
-                                      manager.weeklySessionsCompleted),
+                                      context, manager.weeklySessionsCompleted),
                                   style: Theme.of(context)
                                       .textTheme
                                       .titleMedium
@@ -427,123 +459,155 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ],
                         ),
                       ),
-                      
+
                     // ANIMATED STEP JOURNEY
                     if (state == null)
                       Builder(
                         builder: (context) {
-                          if (manager.repo == null) return const SizedBox.shrink();
-                          
+                          if (manager.repo == null) {
+                            return const SizedBox.shrink();
+                          }
+
                           final now = DateTime.now();
                           final naturalId = int.parse(
                               "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}");
-                              
+
                           return StreamBuilder<DailyActivity?>(
-                            stream: manager.repo!.isar.dailyActivitys.watchObject(naturalId, fireImmediately: true),
+                            stream:
+                                manager.repo!.isar.dailyActivitys.watchObject(
+                              naturalId,
+                              fireImmediately: true,
+                            ),
                             builder: (context, snapshot) {
-                              final int liveSteps = snapshot.data?.totalSteps ?? 0;
+                              final int liveSteps = stepService.dailySteps;
                               final int goal = stepService.stepGoal;
 
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final double trackWidth = constraints.maxWidth;
-                                final double progressRaw = goal > 0 ? (liveSteps / goal) : 0;
-                                final double progress = progressRaw.clamp(0.0, 1.0);
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 24.0, vertical: 16.0),
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final double trackWidth =
+                                        constraints.maxWidth;
+                                    final double progressRaw =
+                                        goal > 0 ? (liveSteps / goal) : 0;
+                                    final double progress =
+                                        progressRaw.clamp(0.0, 1.0);
 
-                                return TweenAnimationBuilder<double>(
-                                  tween: Tween<double>(begin: 0, end: progress),
-                                  // 300ms so the icon glides forward the moment a step is detected
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.easeOut,
-                                  builder: (context, value, child) {
-                                    // The icon is 32px wide, dynamically centered in a 100px container.
-                                    // Local left of icon: 34px. Local right: 66px.
-                                    const double containerWidth = 100.0;
-                                    const double startLeft = -34.0;
-                                    final double endLeft = trackWidth - 66.0;
-                                    final double leftPos = startLeft + ((endLeft - startLeft) * value);
+                                    return TweenAnimationBuilder<double>(
+                                      tween: Tween<double>(
+                                          begin: 0, end: progress),
+                                      // 300ms so the icon glides forward the moment a step is detected
+                                      duration:
+                                          const Duration(milliseconds: 300),
+                                      curve: Curves.easeOut,
+                                      builder: (context, value, child) {
+                                        // The icon is 32px wide, dynamically centered in a 100px container.
+                                        // Local left of icon: 34px. Local right: 66px.
+                                        const double containerWidth = 100.0;
+                                        const double startLeft = -34.0;
+                                        final double endLeft =
+                                            trackWidth - 66.0;
+                                        final double leftPos = startLeft +
+                                            ((endLeft - startLeft) * value);
 
-                                    return Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        SizedBox(
-                                          height: 65,
-                                          width: double.infinity,
-                                          child: Stack(
-                                            clipBehavior: Clip.none,
-                                            children: [
-                                              // 1. The Pinned Goal Text (Right, below track line)
-                                              Positioned(
-                                                bottom: 0,
-                                                right: 0,
-                                                child: Text(
-                                                  '${goal >= 1000 ? '${(goal / 1000).toStringAsFixed(0)}K' : goal}',
-                                                  style: const TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                              // 2. The Track Line (Below icon, above texts)
-                                              Positioned(
-                                                bottom: 24,
-                                                left: 0,
-                                                right: 0,
-                                                child: Container(
-                                                  height: 4,
-                                                  decoration: BoxDecoration(
-                                                    color: const Color(0xFFE0E0E0),
-                                                    borderRadius: BorderRadius.circular(2),
-                                                  ),
-                                                ),
-                                              ),
-                                              // 3. The Traveling Athlete and Current Steps
-                                              Positioned(
-                                                left: leftPos,
-                                                bottom: 0,
-                                                width: containerWidth,
-                                                child: Column(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    const Icon(
-                                                      Icons.directions_walk,
-                                                      size: 32,
-                                                      color: Color(0xFF00897B),
-                                                    ),
-                                                    const SizedBox(height: 6),
-                                                    // Fade out traveling text near the goal to avoid overlapping the pinned label
-                                                    Opacity(
-                                                      opacity: value > 0.90
-                                                          ? (1.0 - ((value - 0.90) * 10.0)).clamp(0.0, 1.0)
-                                                          : 1.0,
-                                                      child: Text(
-                                                        '$liveSteps Steps',
-                                                        textAlign: TextAlign.center,
-                                                        style: const TextStyle(
-                                                          fontSize: 12,
-                                                          color: Color(0xFF00897B),
-                                                          fontWeight: FontWeight.bold,
-                                                          letterSpacing: 0.5,
-                                                        ),
+                                        return Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SizedBox(
+                                              height: 65,
+                                              width: double.infinity,
+                                              child: Stack(
+                                                clipBehavior: Clip.none,
+                                                children: [
+                                                  // 1. The Pinned Goal Text (Right, below track line)
+                                                  Positioned(
+                                                    bottom: 0,
+                                                    right: 0,
+                                                    child: Text(
+                                                      '${goal >= 1000 ? '${(goal / 1000).toStringAsFixed(0)}K' : goal}',
+                                                      style: const TextStyle(
+                                                        fontSize: 12,
+                                                        color: Colors.grey,
+                                                        fontWeight:
+                                                            FontWeight.bold,
                                                       ),
                                                     ),
-                                                  ],
-                                                ),
+                                                  ),
+                                                  // 2. The Track Line (Below icon, above texts)
+                                                  Positioned(
+                                                    bottom: 24,
+                                                    left: 0,
+                                                    right: 0,
+                                                    child: Container(
+                                                      height: 4,
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(
+                                                            0xFFE0E0E0),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(2),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  // 3. The Traveling Athlete and Current Steps
+                                                  Positioned(
+                                                    left: leftPos,
+                                                    bottom: 0,
+                                                    width: containerWidth,
+                                                    child: Column(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        const Icon(
+                                                          Icons.directions_walk,
+                                                          size: 32,
+                                                          color:
+                                                              Color(0xFF00897B),
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 6),
+                                                        // Fade out traveling text near the goal to avoid overlapping the pinned label
+                                                        Opacity(
+                                                          opacity: value > 0.90
+                                                              ? (1.0 -
+                                                                      ((value -
+                                                                              0.90) *
+                                                                          10.0))
+                                                                  .clamp(
+                                                                      0.0, 1.0)
+                                                              : 1.0,
+                                                          child: Text(
+                                                            '$liveSteps ${context.l10n.text('steps')}',
+                                                            textAlign: TextAlign
+                                                                .center,
+                                                            style:
+                                                                const TextStyle(
+                                                              fontSize: 12,
+                                                              color: Color(
+                                                                  0xFF00897B),
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              letterSpacing:
+                                                                  0.5,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                        // Match Ready label removed by request
-                                      ],
+                                            ),
+                                            // Match Ready label removed by request
+                                          ],
+                                        );
+                                      },
                                     );
                                   },
-                                );
-                              },
-                            ),
-                          );
+                                ),
+                              );
                             },
                           );
                         },
@@ -566,7 +630,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Text(
-                                    "HEART RATE",
+                                    context.l10n.text('heartRate'),
                                     style:
                                         Theme.of(context).textTheme.labelLarge,
                                   ),
@@ -610,7 +674,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Column(
                             children: [
                               Text(
-                                "TIME LEFT",
+                                context.l10n.text('timeLeft').toUpperCase(),
                                 style: Theme.of(context).textTheme.labelSmall,
                               ),
                               Text(
@@ -623,7 +687,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             Column(
                               children: [
                                 Text(
-                                  "LAPS LEFT",
+                                  context.l10n.text('lapsLeft').toUpperCase(),
                                   style: Theme.of(context).textTheme.labelSmall,
                                 ),
                                 Text(
@@ -647,7 +711,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Column(
                             children: [
                               Text(
-                                "SPEED",
+                                context.l10n.text('speed').toUpperCase(),
                                 style: Theme.of(context).textTheme.labelSmall,
                               ),
                               Text(
@@ -661,13 +725,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Column(
                             children: [
                               Text(
-                                "DIST",
+                                context.l10n.text('distance').toUpperCase(),
                                 style: Theme.of(context).textTheme.labelSmall,
                               ),
                               Text(
                                 profile.gear == GarageGear.treadmill
-                                    ? "${(manager.treadmillHandler.cumulativeDistanceMiles).toStringAsFixed(2)} miles"
-                                    : "${manager.bikeDistanceMiles.toStringAsFixed(2)} miles",
+                                    ? "${manager.treadmillHandler.cumulativeDistanceMiles.toStringAsFixed(2)} ${context.l10n.text('miles').toLowerCase()}"
+                                    : "${manager.bikeDistanceMiles.toStringAsFixed(2)} ${context.l10n.text('miles').toLowerCase()}",
                                 style: Theme.of(context).textTheme.titleLarge,
                               ),
                             ],
@@ -708,7 +772,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         padding: const EdgeInsets.fromLTRB(
                                             24, 24, 24, 0),
                                         child: Text(
-                                          "SELECT EQUIPMENT",
+                                          context.l10n
+                                              .text('selectEquipment')
+                                              .toUpperCase(),
                                           style: Theme.of(context)
                                               .textTheme
                                               .titleMedium
@@ -753,8 +819,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    _getNameForGear(manager.activeEquipment)
-                                        .toUpperCase(),
+                                    _getNameForGear(
+                                      context,
+                                      manager.activeEquipment,
+                                    ).toUpperCase(),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 12,
@@ -789,15 +857,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 showDialog(
                                   context: context,
                                   builder: (dialogContext) => AlertDialog(
-                                    title: const Text("End Workout?"),
-                                    content: const Text(
-                                      "Do you want to save this session to your history?",
+                                    title: Text(
+                                      context.l10n.text('endWorkoutQuestion'),
+                                    ),
+                                    content: Text(
+                                      context.l10n.text('saveSessionPrompt'),
                                     ),
                                     actions: [
                                       TextButton(
                                         onPressed: () =>
                                             Navigator.pop(dialogContext),
-                                        child: const Text("CANCEL"),
+                                        child: Text(
+                                          context.l10n
+                                              .text('cancel')
+                                              .toUpperCase(),
+                                        ),
                                       ),
                                       TextButton(
                                         onPressed: () {
@@ -807,7 +881,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         style: TextButton.styleFrom(
                                           foregroundColor: Colors.red,
                                         ),
-                                        child: const Text("DISCARD"),
+                                        child: Text(
+                                          context.l10n
+                                              .text('discard')
+                                              .toUpperCase(),
+                                        ),
                                       ),
                                       FilledButton(
                                         onPressed: () async {
@@ -825,7 +903,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             // Just close dialog, the listener will handle the rest
                                           }
                                         },
-                                        child: const Text("SAVE & END"),
+                                        child: Text(
+                                          context.l10n
+                                              .text('saveAndEnd')
+                                              .toUpperCase(),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -835,11 +917,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           backgroundColor:
                               state == null ? Colors.black : Colors.red,
                         ),
-                        child: Text(state == null
-                            ? (manager.hasUserSelectedProfile
-                                ? "START WORKOUT"
-                                : "SELECT SESSION")
-                            : "STOP"),
+                        child: Text(
+                          state == null
+                              ? (manager.hasUserSelectedProfile
+                                  ? context.l10n
+                                      .text('startWorkout')
+                                      .toUpperCase()
+                                  : context.l10n
+                                      .text('selectSession')
+                                      .toUpperCase())
+                              : context.l10n.text('stop').toUpperCase(),
+                        ),
                       ),
                     ),
                   ],
@@ -912,9 +1000,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     final currentSet = manager.currentSetInBlock;
                     final totalSets =
                         manager.workoutState?.totalIntervalsInBlock ?? 0;
-                    return totalSets > 0
-                        ? "SET ${currentSet + 1}/$totalSets"
-                        : "SET --";
+                    return strengthSetProgressLabel(
+                      l10n: context.l10n,
+                      completedSets: currentSet,
+                      totalSets: totalSets,
+                    );
                   }(),
                   style: const TextStyle(
                     color: Color(0xFF00897B), // Green text
@@ -923,7 +1013,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
                 Text(
-                  "LOG LOAD",
+                  context.l10n.text('logLoad').toUpperCase(),
                   style: const TextStyle(
                     color: Color(0xFF00897B), // Green text
                     fontSize: 10,
@@ -1063,86 +1153,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  String _getNameForGear(GarageGear gear) {
+  String _getNameForGear(BuildContext context, GarageGear gear) {
     switch (gear) {
       case GarageGear.noEquipment:
-        return "No-Equipment";
+        return context.l10n.text('noEquipment');
       case GarageGear.dumbbells:
-        return "Dumbbell";
+        return context.l10n.text('dumbbell');
       case GarageGear.barbell:
-        return "Barbell";
+        return context.l10n.text('barbell');
       case GarageGear.bench:
-        return "Bench";
+        return context.l10n.text('bench');
       default:
-        return "None";
+        return context.l10n.text('none');
     }
   }
 
-  String _getWeeklyGoalLabel(int sessions) {
-    if (sessions <= 1) return "START STRONG";
-    if (sessions <= 3) return "MATCH FIT";
-    return "ELITE DRIVE";
-  }
-
-  void _showWorkoutSettings(BuildContext context, WorkoutManager manager) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    "WORKOUT SETTINGS",
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    "TARGET BPM: ${manager.profile.targetHeartRate}",
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
-                  Slider(
-                    value: manager.profile.targetHeartRate.toDouble(),
-                    min: 100,
-                    max: 200,
-                    divisions: 20,
-                    label: "${manager.profile.targetHeartRate}",
-                    onChanged: (v) {
-                      manager.updateTargetHeartRate(v.round());
-                      setState(() {});
-                    },
-                    activeColor: const Color(0xFF00897B),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context); // Close modal
-                      widget.onRequestWorkoutSelection?.call();
-                    },
-                    icon: const Icon(Icons.search),
-                    label: const Text("BROWSE WORKOUTS"),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
+  String _getWeeklyGoalLabel(BuildContext context, int sessions) {
+    if (sessions <= 1) return context.l10n.text('startStrong').toUpperCase();
+    if (sessions <= 3) return context.l10n.text('matchFit').toUpperCase();
+    return context.l10n.text('eliteDrive').toUpperCase();
   }
 }

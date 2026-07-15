@@ -4,9 +4,11 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:path_provider/path_provider.dart';
-import '../workout_manager.dart';
 import 'package:hilt_core/hilt_core.dart';
+
 import 'camera_bpm_screen.dart';
+import '../l10n/app_localizations.dart';
+import '../workout_manager.dart';
 
 class PostWorkoutSummaryScreen extends StatefulWidget {
   final WorkoutSession session;
@@ -33,9 +35,6 @@ class PostWorkoutSummaryScreen extends StatefulWidget {
 
 class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
   final ScreenshotController _screenshotController = ScreenshotController();
-  bool _isSharing = false;
-
-
 
   @override
   void initState() {
@@ -49,7 +48,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
   }
 
   Future<void> _shareResult() async {
-    setState(() => _isSharing = true);
+    final shareText = context.l10n.text('shareWorkoutResult');
     try {
       final directory = (await getApplicationDocumentsDirectory()).path;
       final imagePath = await _screenshotController.captureAndSave(directory,
@@ -58,15 +57,13 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
       if (imagePath != null) {
         await SharePlus.instance.share(
           ShareParams(
-            text: 'Check out my HILT workout session!',
+            text: shareText,
             files: [XFile(imagePath)],
           ),
         );
       }
     } catch (e) {
       debugPrint('Error sharing: $e');
-    } finally {
-      if (mounted) setState(() => _isSharing = false);
     }
   }
 
@@ -82,7 +79,9 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
 
     final isCombo = widget.session.comboNames != null &&
         widget.session.comboNames!.isNotEmpty;
-    final titleText = isCombo ? "COMBO REPORT" : "MATCH REPORT";
+    final titleText = isCombo
+        ? context.l10n.text('comboReport').toUpperCase()
+        : context.l10n.text('matchReport').toUpperCase();
 
     return Scaffold(
       appBar: AppBar(
@@ -137,7 +136,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Text(
-                                "COMBO SEQUENCE",
+                                context.l10n.text('comboSequence').toUpperCase(),
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
@@ -160,7 +159,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                                       borderRadius: BorderRadius.circular(16),
                                     ),
                                     child: Text(
-                                      name.toUpperCase(),
+                                      context.l10n.content(name).toUpperCase(),
                                       style: const TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
@@ -191,9 +190,9 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                                   height: 1.0,
                                 ),
                               ),
-                              const Text(
-                                'PEAK BPM',
-                                style: TextStyle(
+                              Text(
+                                context.l10n.text('peakBpm').toUpperCase(),
+                                style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.black54,
@@ -264,9 +263,9 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                             ),
                             titlesData: FlTitlesData(
                               show: true,
-                              rightTitles: AxisTitles(
+                              rightTitles: const AxisTitles(
                                   sideTitles: SideTitles(showTitles: false)),
-                              topTitles: AxisTitles(
+                              topTitles: const AxisTitles(
                                   sideTitles: SideTitles(showTitles: false)),
                               leftTitles: AxisTitles(
                                 sideTitles: SideTitles(
@@ -287,7 +286,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                                   },
                                 ),
                               ),
-                              bottomTitles: AxisTitles(
+                              bottomTitles: const AxisTitles(
                                   sideTitles: SideTitles(showTitles: false)),
                             ),
                             borderData: FlBorderData(show: false),
@@ -304,7 +303,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                                 isCurved: true,
                                 color: Colors.black,
                                 barWidth: 2,
-                                dotData: FlDotData(show: false),
+                                dotData: const FlDotData(show: false),
                                 belowBarData: BarAreaData(show: false),
                                 aboveBarData: BarAreaData(show: false),
                               ),
@@ -318,7 +317,10 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                                   dashArray: [4, 4],
                                   label: HorizontalLineLabel(
                                     show: true,
-                                    labelResolver: (line) => "TARGET",
+                                    labelResolver: (line) => context
+                                        .l10n
+                                        .text('target')
+                                        .toUpperCase(),
                                     style: const TextStyle(
                                       color: hiltTeal, // Hilt Teal
                                       fontSize: 10,
@@ -381,9 +383,9 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                               }
                             }
                           },
-                          child: const Text(
-                            'DONE',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10n.text('done').toUpperCase(),
+                            style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w900,
                               letterSpacing: 1.2,
@@ -402,82 +404,6 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
       ),
     );
   }
-
-  final _distanceController = TextEditingController();
-  final _inclineController = TextEditingController();
-
-  Widget _buildTreadmillInputs(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "TREADMILL STATS (OPTIONAL)",
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _buildInput(_distanceController, "DISTANCE", "KM"),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _buildInput(_inclineController, "INCLINE", "%"),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInput(
-      TextEditingController controller, String label, String suffix) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey,
-            ),
-          ),
-          TextField(
-            controller: controller,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
-            decoration: InputDecoration(
-              isDense: true,
-              border: InputBorder.none,
-              suffixText: suffix,
-              suffixStyle: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildTacticalDataGrid(BuildContext context) {
     const dividerColor = Color(0xFF00897B); // Hilt Teal
     // 0.3 opacity for dividers
@@ -505,19 +431,26 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
             child: Row(
               children: [
                 Expanded(
-                    child: _statItem("AVG BPM",
-                        "${widget.session.averageBpm.toStringAsFixed(0)}")),
+                    child: _statItem(context.l10n.text('avgBpm'),
+                        widget.session.averageBpm.toStringAsFixed(0))),
                 VerticalDivider(color: subtleDivider, width: dividerThickness),
                 Expanded(
                     child: isTreadmill && widget.session.distance! > 0
                         ? _editableStatItem(
                             context,
-                            "DISTANCE",
-                            "${((widget.session.distance ?? 0.0) * 0.621371).toStringAsFixed(2)} MILES",
+                            context.l10n.text('distance').toUpperCase(),
+                            "${((widget.session.distance ?? 0.0) * 0.621371).toStringAsFixed(2)} ${context.l10n.text('miles').toUpperCase()}",
                             icon: Icons.edit,
                             onTap: () => _showEditDistanceDialog(context),
                           )
-                        : _statItem("ZONE", widget.session.peakBpm >= 150 ? "ELITE" : (widget.session.peakBpm >= 120 ? "ACTIVE" : "WARMUP"))),
+                        : _statItem(
+                            context.l10n.text('zone').toUpperCase(),
+                            widget.session.peakBpm >= 150
+                                ? context.l10n.text('elite').toUpperCase()
+                                : (widget.session.peakBpm >= 120
+                                    ? context.l10n.text('active').toUpperCase()
+                                    : context.l10n.text('warmup').toUpperCase()),
+                          )),
               ],
             ),
           ),
@@ -528,13 +461,16 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
               children: [
                 Expanded(
                     child: _statItem(
-                        isCombo ? "COMBO TIME" : "DURATION",
+                        isCombo
+                            ? context.l10n.text('comboTime').toUpperCase()
+                            : context.l10n.text('duration').toUpperCase(),
                         _formatDuration(widget.session.durationSeconds ??
                             widget.session.heartRateReadings.length))),
                 VerticalDivider(color: subtleDivider, width: dividerThickness),
                 Expanded(
                     child: _statItem(
-                        "CALORIES", _calculateCalories().toStringAsFixed(0))),
+                        context.l10n.text('calories').toUpperCase(),
+                        _calculateCalories().toStringAsFixed(0))),
                 VerticalDivider(color: subtleDivider, width: dividerThickness),
                 Expanded(
                   child: Builder(builder: (context) {
@@ -567,7 +503,9 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            isElite ? "ELITE ENGINE" : "CARDIO LOAD",
+                            isElite
+                                ? context.l10n.text('eliteEngine').toUpperCase()
+                                : context.l10n.text('cardioLoad').toUpperCase(),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
@@ -599,17 +537,19 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Edit Distance"),
+        title: Text(context.l10n.text('editDistance')),
         content: TextField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(suffixText: "MILES"),
+          decoration: InputDecoration(
+            suffixText: context.l10n.text('miles').toUpperCase(),
+          ),
           autofocus: true,
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("CANCEL")),
+              child: Text(context.l10n.text('cancel').toUpperCase())),
           FilledButton(
               onPressed: () {
                 final newDistMiles = double.tryParse(controller.text);
@@ -626,7 +566,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                 }
                 Navigator.pop(context);
               },
-              child: const Text("SAVE"))
+              child: Text(context.l10n.text('save').toUpperCase()))
         ],
       ),
     );
@@ -744,7 +684,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        Text("MATCH GRADE",
+        Text(context.l10n.text('matchGrade').toUpperCase(),
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
@@ -784,9 +724,9 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                 ),
               ),
               const SizedBox(height: 4),
-              const Text(
-                "VOL",
-                style: TextStyle(
+              Text(
+                context.l10n.text('volumeShort').toUpperCase(),
+                style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
                   color: Colors.blueAccent,
@@ -796,7 +736,7 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
           ),
         ),
         const SizedBox(height: 16), // Match spacing of grade label
-        Text("OUTPUT",
+        Text(context.l10n.text('output').toUpperCase(),
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
@@ -862,13 +802,17 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: _statItem("TOTAL STEPS", steps.toString()),
+                  child: _statItem(
+                    context.l10n.text('totalStepsLabel').toUpperCase(),
+                    steps.toString(),
+                  ),
                 ),
                 VerticalDivider(
                     color: subtleDivider, width: dividerThickness),
                 Expanded(
                   child: _statItem(
-                      "MILES COVERED", miles.toStringAsFixed(2)),
+                      context.l10n.text('milesCovered').toUpperCase(),
+                      miles.toStringAsFixed(2)),
                 ),
               ],
             ),
@@ -880,7 +824,8 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
               children: [
                 Expanded(
                   child: _statItem(
-                      "CALORIES", cals.toStringAsFixed(0)),
+                      context.l10n.text('calories').toUpperCase(),
+                      cals.toStringAsFixed(0)),
                 ),
                 VerticalDivider(
                     color: subtleDivider, width: dividerThickness),
@@ -910,7 +855,9 @@ class _PostWorkoutSummaryScreenState extends State<PostWorkoutSummaryScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          isElite ? "ELITE ENGINE" : "CARDIO LOAD",
+                          isElite
+                              ? context.l10n.text('eliteEngine').toUpperCase()
+                              : context.l10n.text('cardioLoad').toUpperCase(),
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,

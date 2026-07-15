@@ -1,6 +1,7 @@
-import 'package:vector_math/vector_math_64.dart' show Matrix4, Vector3;
 import 'package:flutter/material.dart';
 import 'package:hilt_core/hilt_core.dart';
+
+import '../l10n/app_localizations.dart';
 
 class EquipmentSelector extends StatelessWidget {
   final GarageGear selectedGear;
@@ -24,7 +25,7 @@ class EquipmentSelector extends StatelessWidget {
         children: [
           if (showLabel) ...[
             Text(
-              "EQUIPMENT",
+              context.l10n.text('equipment').toUpperCase(),
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: Colors.grey[600],
@@ -39,26 +40,26 @@ class EquipmentSelector extends StatelessWidget {
                 context,
                 GarageGear.noEquipment,
                 Icons.bolt,
-                "None",
+                context.l10n.text('none'),
               ),
               _buildEquipmentOption(
                 context,
                 GarageGear.dumbbells,
                 Icons.grid_view,
-                "Dumbbell",
+                context.l10n.text('dumbbell'),
               ),
               _buildEquipmentOption(
                 context,
                 GarageGear.barbell,
                 Icons.iron,
-                "Barbell",
+                context.l10n.text('barbell'),
                 rotateIcon: true,
               ),
               _buildEquipmentOption(
                 context,
                 GarageGear.bench,
                 Icons.horizontal_rule,
-                "Bench",
+                context.l10n.text('bench'),
                 scaleY: 4.0, // Thicken the line to look like a bench
               ),
             ],
@@ -77,7 +78,7 @@ class EquipmentSelector extends StatelessWidget {
     double scaleY = 1.0,
   }) {
     final isSelected = selectedGear == gear;
-    final hiltGreen = const Color(0xFF00897B);
+    const hiltGreen = Color(0xFF00897B);
 
     return InkWell(
       onTap: () => onEquipmentSelected(gear),
@@ -100,7 +101,7 @@ class EquipmentSelector extends StatelessWidget {
             Transform(
               transform: Matrix4.identity()
                 ..rotateZ(rotateIcon ? 1.5708 : 0)
-                ..scaleByVector3(Vector3(1.0, scaleY, 1.0)),
+                ..scaleByDouble(1.0, scaleY, 1.0, 1.0),
               alignment: Alignment.center,
               child: Icon(
                 icon,

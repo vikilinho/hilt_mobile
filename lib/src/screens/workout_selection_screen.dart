@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:hilt_core/hilt_core.dart';
-import '../workout_manager.dart';
-import '../football_library.dart';
-import '../services/bike_connector_service.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:hilt_core/hilt_core.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+
+import '../football_library.dart';
+import '../l10n/app_localizations.dart';
+import '../services/bike_connector_service.dart';
+import '../workout_manager.dart';
 
 class WorkoutSelectionScreen extends StatefulWidget {
   final VoidCallback onWorkoutStarted;
@@ -144,7 +146,7 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
                   icon: const Icon(Icons.arrow_back),
                 ),
                 Text(
-                  _categoryTitle,
+                  _localizedCategoryTitle(context),
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -167,6 +169,34 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
     );
   }
 
+  String _localizedCategoryTitle(BuildContext context) {
+    final l10n = context.l10n;
+    final parts = _categoryTitle.split(' - ');
+    final localizedParts = parts.map((part) {
+      switch (part) {
+        case 'Cardio':
+          return l10n.text('cardio');
+        case 'Strength':
+          return l10n.text('strength');
+        case 'Bike':
+          return l10n.text('stationaryBike');
+        case 'Treadmill':
+          return l10n.text('treadmill');
+        case 'No-Equipment':
+          return l10n.text('noEquipment');
+        case 'Barbell':
+          return l10n.text('barbell');
+        case 'Dumbbell':
+          return l10n.text('dumbbell');
+        case 'Bench':
+          return l10n.text('bench');
+        default:
+          return part;
+      }
+    }).toList();
+    return localizedParts.join(' - ');
+  }
+
   Widget _buildCategories() {
     return ListView(
       padding: EdgeInsets.zero, // Padding handled internally
@@ -175,7 +205,7 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
         Padding(
           padding: const EdgeInsets.only(top: 60, left: 25, bottom: 40),
           child: Text(
-            "SELECT TRAINING",
+            context.l10n.text('selectTraining').toUpperCase(),
             style: const TextStyle(
               fontFamily:
                   'Classic', // Assuming Classic font is available, else fallback
@@ -200,8 +230,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
           },
           child: RepaintBoundary(
             child: _CategoryCard(
-              title: "Cardio",
-              subtitle: "Bike, Running, Football",
+              title: context.l10n.text('cardio'),
+              subtitle: context.l10n.text('cardioSubtitle'),
               icon: Icons.directions_run,
               gradient: const LinearGradient(
                 colors: [Colors.green, Colors.teal],
@@ -235,8 +265,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
           },
           child: RepaintBoundary(
             child: _CategoryCard(
-              title: "Strength",
-              subtitle: "Weights, Power, Explosiveness",
+              title: context.l10n.text('strength'),
+              subtitle: context.l10n.text('strengthSubtitle'),
               icon: Icons.fitness_center,
               gradient: const LinearGradient(
                 colors: [Colors.blue, Colors.indigo],
@@ -265,8 +295,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
       children: [
         _buildAnimatedItem(
           _CategoryCard(
-            title: "Stationary Bike",
-            subtitle: "Match Sim, Box-to-Box",
+            title: context.l10n.text('stationaryBike'),
+            subtitle: context.l10n.text('stationaryBikeSubtitle'),
             icon: Icons.directions_bike,
             gradient: const LinearGradient(
               colors: [Colors.purple, Colors.deepPurpleAccent],
@@ -282,8 +312,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
         const SizedBox(height: 16),
         _buildAnimatedItem(
           _CategoryCard(
-            title: "Treadmill",
-            subtitle: "Sprints, Intervals",
+            title: context.l10n.text('treadmill'),
+            subtitle: context.l10n.text('treadmillSubtitle'),
             icon: Icons.directions_run,
             gradient: const LinearGradient(
               colors: [Colors.blueGrey, Colors.black87],
@@ -300,8 +330,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
         const SizedBox(height: 16),
         _buildAnimatedItem(
           _CategoryCard(
-            title: "No-Equipment",
-            subtitle: "Squats, Lunges, Climbers",
+            title: context.l10n.text('noEquipment'),
+            subtitle: context.l10n.text('noEquipmentSubtitle'),
             icon: Icons.directions_run,
             gradient: const LinearGradient(
               colors: [Colors.orange, Colors.deepOrange],
@@ -335,8 +365,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
       children: [
         _buildAnimatedItem(
           _CategoryCard(
-            title: "Barbell",
-            subtitle: "Squats, Cleans, Deadlifts",
+            title: context.l10n.text('barbell'),
+            subtitle: context.l10n.text('barbellSubtitle'),
             icon: Icons.fitness_center,
             gradient: const LinearGradient(
               colors: [Color(0xFF78909C), Color(0xFF37474F)], // Steel Blue Grey
@@ -352,8 +382,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
         const SizedBox(height: 16),
         _buildAnimatedItem(
           _CategoryCard(
-            title: "Dumbbell",
-            subtitle: "Squats, Lunges, Press",
+            title: context.l10n.text('dumbbell'),
+            subtitle: context.l10n.text('dumbbellSubtitle'),
             icon: Icons.fitness_center,
             gradient: const LinearGradient(
               colors: [Colors.teal, Colors.tealAccent], // Distinct color for DB
@@ -369,8 +399,8 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
         const SizedBox(height: 16),
         _buildAnimatedItem(
           _CategoryCard(
-            title: "Bench",
-            subtitle: "Dips, Split Squats, Step-Ups",
+            title: context.l10n.text('bench'),
+            subtitle: context.l10n.text('benchSubtitle'),
             icon: Icons.weekend,
             gradient: const LinearGradient(
               colors: [Colors.deepPurple, Colors.purpleAccent],
@@ -424,7 +454,7 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          "COMBO QUEUE",
+                          context.l10n.text('comboQueue').toUpperCase(),
                           style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -432,7 +462,7 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
                         ),
                         Text(
                           manager.workoutQueue
-                              .map((e) => e.displayName)
+                              .map((e) => context.l10n.content(e.displayName))
                               .join(" + "),
                           style: const TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 14),
@@ -522,8 +552,10 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
                 OutlinedButton.icon(
                   onPressed: () => openAppSettings(),
                   icon: const Icon(Icons.security, color: Colors.orange),
-                  label: const Text("GRANT PERMISSIONS",
-                      style: TextStyle(color: Colors.orange)),
+                  label: Text(
+                    context.l10n.text('grantPermissions').toUpperCase(),
+                    style: const TextStyle(color: Colors.orange),
+                  ),
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: Colors.orange),
                   ),
@@ -538,7 +570,11 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.bluetooth),
-                  label: Text(isScanning ? "CONNECTING..." : "CONNECT BIKE"),
+                  label: Text(
+                    isScanning
+                        ? context.l10n.text('connecting').toUpperCase()
+                        : context.l10n.text('connectBike').toUpperCase(),
+                  ),
                 ),
             ],
           ),
@@ -560,10 +596,14 @@ class _WorkoutSelectionScreenState extends State<WorkoutSelectionScreen>
             profile.isStrength ? Icons.fitness_center : Icons.sports_soccer,
             color: profile.isStrength ? const Color(0xFF00897B) : Colors.green,
           ),
-          title: Text(profile.displayName),
-          subtitle: Text(profile.isStrength
-              ? "${profile.blocks.fold(0, (sum, block) => sum + block.iterations)} Sets"
-              : "${profile.blocks.length} Blocks"),
+          title: Text(context.l10n.content(profile.displayName)),
+          subtitle: Text(
+            profile.isStrength
+                ? context.l10n.setsLabel(
+                    profile.blocks.fold(0, (sum, block) => sum + block.iterations),
+                  )
+                : context.l10n.blocksLabel(profile.blocks.length),
+          ),
           onTap: () {
             // Start the workout!
             manager.loadPreset(profile);

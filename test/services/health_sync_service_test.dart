@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:health/health.dart';
 import 'package:hilt_mobile/src/services/health_sync_service.dart';
 
 void main() {
@@ -36,5 +37,62 @@ void main() {
       final calories2 = HealthSyncService.calculateCalories(1234);
       expect(calories2, 49);
     });
+
+    test('selectDeviceDailyStepTotal prefers phone steps over Fitbit totals', () {
+      final points = [
+        _stepPoint(
+          steps: 1900,
+          sourceName: 'Pixel Phone',
+          sourceId: 'android.phone',
+        ),
+        _stepPoint(
+          steps: 10000,
+          sourceName: 'Fitbit',
+          sourceId: 'com.fitbit.FitbitMobile',
+        ),
+      ];
+
+      expect(HealthSyncService.selectDeviceDailyStepTotal(points), 1900);
+    });
+
+    test('selectDeviceDailyStepTotal ignores manual entries', () {
+      final points = [
+        _stepPoint(
+          steps: 2500,
+          sourceName: 'Pixel Phone',
+          sourceId: 'android.phone',
+        ),
+        _stepPoint(
+          steps: 7000,
+          sourceName: 'Manual Entry',
+          sourceId: 'manual',
+          recordingMethod: RecordingMethod.manual,
+        ),
+      ];
+
+      expect(HealthSyncService.selectDeviceDailyStepTotal(points), 2500);
+    });
   });
+}
+
+HealthDataPoint _stepPoint({
+  required int steps,
+  required String sourceName,
+  required String sourceId,
+  RecordingMethod recordingMethod = RecordingMethod.automatic,
+}) {
+  final now = DateTime(2026, 6, 3, 12);
+  return HealthDataPoint(
+    uuid: '$sourceId-$steps',
+    value: NumericHealthValue(numericValue: steps),
+    type: HealthDataType.STEPS,
+    unit: HealthDataUnit.COUNT,
+    dateFrom: now.subtract(const Duration(minutes: 10)),
+    dateTo: now,
+    sourcePlatform: HealthPlatformType.googleHealthConnect,
+    sourceDeviceId: 'test-device',
+    sourceId: sourceId,
+    sourceName: sourceName,
+    recordingMethod: recordingMethod,
+  );
 }

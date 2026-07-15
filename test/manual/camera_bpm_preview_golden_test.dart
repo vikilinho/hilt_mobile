@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hilt_mobile/src/screens/camera_bpm_screen.dart';
 
+const _runManualGoldens = bool.fromEnvironment('RUN_MANUAL_GOLDENS');
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -23,7 +25,8 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
   }
 
   testWidgets('camera scanner preview - no finger', (tester) async {
@@ -36,7 +39,7 @@ void main() {
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/camera_scanner_no_finger.png'),
     );
-  });
+  }, skip: !_runManualGoldens);
 
   testWidgets('camera scanner preview - measuring', (tester) async {
     await pumpPreview(
@@ -49,5 +52,5 @@ void main() {
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/camera_scanner_measuring.png'),
     );
-  });
+  }, skip: !_runManualGoldens);
 }

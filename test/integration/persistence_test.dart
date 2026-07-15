@@ -2,10 +2,11 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:isar_community/isar.dart';
+import '../support/isar_test_bootstrap.dart';
 
 void main() {
   setUpAll(() async {
-    await Isar.initializeIsarCore(download: true);
+    await initializeTestIsarCore();
   });
 
   group('DailyActivity Persistence Engine', () {

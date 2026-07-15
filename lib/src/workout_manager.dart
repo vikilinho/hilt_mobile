@@ -3,8 +3,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:hilt_core/hilt_core.dart';
-import 'package:isar_community/isar.dart';
-import 'package:path_provider/path_provider.dart';
 import 'football_library.dart';
 // import 'package:flutter_wearable_data_layer/flutter_wearable_data_layer.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -18,6 +16,7 @@ import 'package:hilt_mobile/src/logic/treadmill_handler.dart';
 import 'package:health/health.dart';
 import 'package:hilt_mobile/src/services/health_authorization.dart';
 import 'package:hilt_mobile/src/services/health_step_totals.dart';
+import 'package:hilt_mobile/src/data/app_database.dart';
 
 // Mock for build success (Connectivity Package Missing)
 class WearableDataLayer {
@@ -25,7 +24,7 @@ class WearableDataLayer {
 }
 
 class WorkoutManager extends ChangeNotifier {
-  static const int _stepHistoryRebuildVersion = 1;
+  static const int _stepHistoryRebuildVersion = 2;
 
   WorkoutEngine? _engine;
 
@@ -60,7 +59,9 @@ class WorkoutManager extends ChangeNotifier {
   int get currentSetInBlock => _currentSetInBlock;
 
   // Watch / Bike data layer subscriptions
+  final _watchConnectivity = WatchConnectivity();
   StreamSubscription? _watchSubscription;
+  StreamSubscription? _watchContextSubscription;
   StreamSubscription? _bikeSubscription;
 
   // FTMS Bike Connectivity
@@ -93,12 +94,10 @@ class WorkoutManager extends ChangeNotifier {
   bool sessionNeedsManualBpmCapture(WorkoutSession session) {
     final readings = session.heartRateReadings;
     final positiveReadingCount = readings.where((bpm) => bpm > 0).length;
-    final hasSessionHeartRate =
-        session.peakBpm > 0 ||
+    final hasSessionHeartRate = session.peakBpm > 0 ||
         session.averageBpm > 0 ||
         positiveReadingCount >= 3;
-    final hasRecentLiveHeartRate =
-        _currentBpm > 0 &&
+    final hasRecentLiveHeartRate = _currentBpm > 0 &&
         _lastHeartRateTime != null &&
         DateTime.now().difference(_lastHeartRateTime!) <
             const Duration(minutes: 5);
@@ -109,7 +108,8 @@ class WorkoutManager extends ChangeNotifier {
   void recalculateGrade(WorkoutSession session, int newPeakBpm) {
     session.peakBpm = newPeakBpm;
     final inZone = session.timeInTargetZone;
-    final duration = session.durationSeconds ?? session.heartRateReadings.length;
+    final duration =
+        session.durationSeconds ?? session.heartRateReadings.length;
     final ratio = duration > 0 ? inZone / duration : 0.0;
     String newGrade;
     if (ratio >= 0.7 && newPeakBpm >= 150) {
@@ -120,6 +120,38 @@ class WorkoutManager extends ChangeNotifier {
       newGrade = 'C';
     }
     session.grade = newGrade;
+  }
+
+  Future<void> applyManualBpmToSession(
+    WorkoutSession session,
+    int bpm,
+  ) async {
+    if (bpm <= 0) return;
+
+    final sessionDuration = session.durationSeconds ?? 0;
+    final fallbackReadingCount = sessionDuration > 0 ? sessionDuration : 1;
+    final readings = session.heartRateReadings.where((value) => value > 0);
+    final updatedReadings = readings.isEmpty
+        ? List<int>.filled(fallbackReadingCount, bpm)
+        : <int>[...readings, bpm];
+    final average =
+        updatedReadings.reduce((a, b) => a + b) / updatedReadings.length;
+    final peak = updatedReadings.reduce((a, b) => a > b ? a : b);
+    final inTargetZone =
+        updatedReadings.where((value) => value >= sessionTargetBpm).length;
+
+    session
+      ..heartRateReadings = updatedReadings
+      ..averageBpm = average
+      ..peakBpm = peak
+      ..timeInTargetZone = inTargetZone;
+
+    recalculateGrade(session, peak);
+    await saveSessionToDatabase(session);
+    _currentBpm = bpm;
+    _lastHeartRateTime = DateTime.now();
+    _bpmController.add(bpm);
+    notifyListeners();
   }
 
   // Treadmill Speed/Distance Tracking (from Watch)
@@ -137,7 +169,7 @@ class WorkoutManager extends ChangeNotifier {
   GarageGear get activeEquipment => _activeEquipment;
 
   // Weekly Goal Logic
-  int _weeklyGoal = 5;
+  final int _weeklyGoal = 5;
   int get weeklyGoal => _weeklyGoal;
 
   int get weeklySessionsCompleted {
@@ -369,7 +401,6 @@ class WorkoutManager extends ChangeNotifier {
 
     // 2. Stop Engine
     _engine?.stop();
-    WakelockPlus.disable();
 
     _endingBpm = _currentBpm;
     _workoutQueue.clear();
@@ -524,9 +555,11 @@ class WorkoutManager extends ChangeNotifier {
         // Existing Logic
         if (_workIntervalsTotalTime > 0) {
           final pct = _workIntervalsTimeInZone / _workIntervalsTotalTime;
-          if (pct >= 0.9)
+          if (pct >= 0.9) {
             grade = 'A';
-          else if (pct >= 0.7) grade = 'B';
+          } else if (pct >= 0.7) {
+            grade = 'B';
+          }
         }
       }
     }
@@ -546,9 +579,11 @@ class WorkoutManager extends ChangeNotifier {
 
       if (transitionBonus) {
         // Apply Bonus
-        if (grade == 'C')
+        if (grade == 'C') {
           grade = 'B';
-        else if (grade == 'B') grade = 'A';
+        } else if (grade == 'B') {
+          grade = 'A';
+        }
 
         cardioLoad += 0.5; // Bump Cardio Load slightly for transition intensity
       }
@@ -861,6 +896,7 @@ class WorkoutManager extends ChangeNotifier {
   int get currentBpm => _currentBpm;
   WorkoutState? get workoutState => _lastState;
   SportProfile get profile => _currentProfile;
+  int get sessionTargetBpm => _currentProfile.targetHeartRate;
   List<WorkoutSession> get history => _history;
   int? get recoveryScore => _recoveryScore;
   DateTime? get lastHeartRateTime => _lastHeartRateTime;
@@ -868,6 +904,8 @@ class WorkoutManager extends ChangeNotifier {
 
   DateTime? _lastHeartRateTime;
   DateTime? _workoutStartTime;
+  int? _lastWatchPayloadTimestamp;
+  int? _lastWatchPayloadBpm;
 
   // Restore Missing Fields and Constructor
   SportProfile _currentProfile = FootballLibrary.warmup;
@@ -901,11 +939,7 @@ class WorkoutManager extends ChangeNotifier {
   }
 
   Future<void> _initDb() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final isar = await Isar.open(
-      [WorkoutSessionSchema, UserStatsSchema, DailyActivitySchema],
-      directory: dir.path,
-    );
+    final isar = await AppDatabase.open();
     _repo = SessionRepository(isar);
     await refreshHistory();
   }
@@ -945,7 +979,10 @@ class WorkoutManager extends ChangeNotifier {
     final midnight = DateTime(now.year, now.month, now.day);
     final rebuildStart = midnight.subtract(const Duration(days: 30));
     final health = Health();
-    final granted = await HealthAuthorization.ensureStepReadAccess(health);
+    final granted = await HealthAuthorization.ensureStepReadAccess(
+      health,
+      interactive: false,
+    );
     if (!granted) {
       debugPrint(
         '[Mobile] Step history rebuild skipped because Health Connect access was not granted.',
@@ -953,22 +990,20 @@ class WorkoutManager extends ChangeNotifier {
       return false;
     }
 
-    final sessions = await _repo!.getAllSessions();
-    final recentDailyStepSessions = sessions.where((session) {
-      final isDailySteps = session.comboNames?.contains('Daily Steps') ?? false;
-      return isDailySteps && !session.timestamp.isBefore(rebuildStart);
-    }).toList();
-
-    for (final session in recentDailyStepSessions) {
-      await _repo!.deleteSession(session.id);
-    }
-
     final stepsPerDay =
         await HealthStepTotals.getDailyTotals(health, rebuildStart, now);
-    await _upsertHistoricalStepSessions(stepsPerDay, const []);
+    if (stepsPerDay.isEmpty) {
+      debugPrint(
+        '[Mobile] Step history rebuild skipped because Health Connect returned no historical step totals.',
+      );
+      return false;
+    }
+
+    final sessions = await _repo!.getAllSessions();
+    await _upsertHistoricalStepSessions(stepsPerDay, sessions);
 
     debugPrint(
-      '[Mobile] Rebuilt ${stepsPerDay.length} recent daily step records from Health Connect aggregates.',
+      '[Mobile] Merged ${stepsPerDay.length} recent daily step records from Health Connect aggregates.',
     );
     return true;
   }
@@ -1004,7 +1039,10 @@ class WorkoutManager extends ChangeNotifier {
           "[Mobile] Performing Safety Sync: Fetching Health Connect steps from $rangeStart to $now...");
 
       final health = Health();
-      final granted = await HealthAuthorization.ensureStepReadAccess(health);
+      final granted = await HealthAuthorization.ensureStepReadAccess(
+        health,
+        interactive: false,
+      );
       if (!granted) {
         debugPrint(
             "[Mobile] Health Connect permissions denied. Skipping Safety Sync.");
@@ -1015,15 +1053,15 @@ class WorkoutManager extends ChangeNotifier {
           await HealthStepTotals.getDailyTotals(health, rangeStart, now);
 
       if (stepsPerDay.isEmpty) {
-         debugPrint("[Mobile] No historical steps found.");
-         return;
+        debugPrint("[Mobile] No historical steps found.");
+        return;
       }
 
       await _upsertHistoricalStepSessions(stepsPerDay, sessions);
-      
+
       await refreshHistory();
-      debugPrint("[Mobile] Safety Sync Complete: Upserted ${stepsPerDay.length} daily step records.");
-      
+      debugPrint(
+          "[Mobile] Safety Sync Complete: Upserted ${stepsPerDay.length} daily step records.");
     } catch (e) {
       debugPrint("[Mobile] Error during Safety Sync: $e");
     } finally {
@@ -1053,10 +1091,13 @@ class WorkoutManager extends ChangeNotifier {
         return sessionDay.isAtSameMomentAs(date);
       }).lastOrNull;
 
+      final existingSteps = existing?.steps ?? 0;
+      final mergedSteps =
+          totalSteps > existingSteps ? totalSteps : existingSteps;
       final distanceInMiles =
-          double.parse((totalSteps * 0.00047).toStringAsFixed(1));
+          double.parse((mergedSteps * 0.00047).toStringAsFixed(1));
       final caloriesBurned =
-          double.parse((totalSteps * 0.04).toStringAsFixed(1));
+          double.parse((mergedSteps * 0.04).toStringAsFixed(1));
 
       final session = existing ??
           (WorkoutSession()
@@ -1072,7 +1113,7 @@ class WorkoutManager extends ChangeNotifier {
 
       session
         ..timestamp = DateTime(date.year, date.month, date.day, 23, 59)
-        ..steps = totalSteps
+        ..steps = mergedSteps
         ..distance = distanceInMiles
         ..calories = caloriesBurned;
 
@@ -1080,13 +1121,12 @@ class WorkoutManager extends ChangeNotifier {
     }
   }
 
-  final _watchConnectivity = WatchConnectivity();
-
   @override
   void dispose() {
     _workoutStateSubscription?.cancel();
     _recoverySubscription?.cancel();
     _watchSubscription?.cancel();
+    _watchContextSubscription?.cancel();
     _bikeSubscription?.cancel();
     _sessionCompleteController.close();
     _bpmController.close();
@@ -1096,27 +1136,15 @@ class WorkoutManager extends ChangeNotifier {
   void _initDataLayer() {
     debugPrint("[Mobile] Initializing Watch Connectivity...");
     _watchSubscription = _watchConnectivity.messageStream.listen((message) {
-      if (message.containsKey('bpm') && message['bpm'] is int) {
-        final bpm = message['bpm'] as int;
-        debugPrint("[Mobile] Received BPM: $bpm");
-
-        // Optional: Extract speed and distance if available
-        double? speed;
-        double? distance;
-
-        if (message.containsKey('speed') && message['speed'] != null) {
-          speed = (message['speed'] as num).toDouble();
-          debugPrint("[Mobile] Received Speed: $speed km/h");
-        }
-
-        if (message.containsKey('distance') && message['distance'] != null) {
-          distance = (message['distance'] as num).toDouble();
-          debugPrint("[Mobile] Received Distance: $distance km");
-        }
-
-        _updateBpm(bpm, speed: speed, distance: distance);
-      }
+      _handleWatchPayload(message, channel: 'message');
     });
+
+    _watchContextSubscription =
+        _watchConnectivity.contextStream.listen((context) {
+      _handleWatchPayload(context, channel: 'context');
+    });
+
+    _loadLatestWatchContext();
 
     _bikeSubscription = _bikeService.dataStream.listen((data) {
       final speedParam =
@@ -1134,5 +1162,67 @@ class WorkoutManager extends ChangeNotifier {
       }
       notifyListeners();
     });
+  }
+
+  Future<void> _loadLatestWatchContext() async {
+    try {
+      final contexts = await _watchConnectivity.receivedApplicationContexts;
+      for (final context in contexts) {
+        _handleWatchPayload(context, channel: 'cached context');
+      }
+    } catch (error) {
+      debugPrint("[Mobile] Unable to load cached watch context: $error");
+    }
+  }
+
+  void _handleWatchPayload(
+    Map<String, dynamic> message, {
+    required String channel,
+  }) {
+    final bpm = _bpmFromWatchMessage(message);
+    if (bpm == null) return;
+
+    final rawTimestamp = message['timestamp'];
+    final timestamp = rawTimestamp is num ? rawTimestamp.round() : null;
+    if (timestamp != null &&
+        timestamp == _lastWatchPayloadTimestamp &&
+        bpm == _lastWatchPayloadBpm) {
+      return;
+    }
+    _lastWatchPayloadTimestamp = timestamp;
+    _lastWatchPayloadBpm = bpm;
+
+    debugPrint("[Mobile] Received BPM: $bpm from watch $channel: $message");
+
+    double? speed;
+    double? distance;
+
+    final rawSpeed = message['speed'];
+    if (rawSpeed is num) {
+      speed = rawSpeed.toDouble();
+      debugPrint("[Mobile] Received Speed: $speed km/h");
+    }
+
+    final rawDistance = message['distance'];
+    if (rawDistance is num) {
+      distance = rawDistance.toDouble();
+      debugPrint("[Mobile] Received Distance: $distance km");
+    }
+
+    _updateBpm(bpm, speed: speed, distance: distance);
+  }
+
+  int? _bpmFromWatchMessage(Map<String, dynamic> message) {
+    final value = message['bpm'];
+    if (value is int) return value > 0 ? value : null;
+    if (value is num) {
+      final bpm = value.round();
+      return bpm > 0 ? bpm : null;
+    }
+    if (value is String) {
+      final bpm = int.tryParse(value);
+      return bpm != null && bpm > 0 ? bpm : null;
+    }
+    return null;
   }
 }

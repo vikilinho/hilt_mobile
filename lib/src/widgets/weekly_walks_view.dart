@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
 import '../screens/step_detail_view.dart';
 
 class WeeklyWalksView extends StatelessWidget {
@@ -89,7 +90,7 @@ class _WeekCard extends StatelessWidget {
             ),
           ),
           title: Text(
-            _getWeekLabel(week.weekStart, now),
+            _getWeekLabel(context, week.weekStart, now),
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w800,
               color: Colors.black87,
@@ -98,7 +99,11 @@ class _WeekCard extends StatelessWidget {
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              _formatWeekRange(week.weekStart, week.weekEnd),
+              _formatWeekRange(
+                context,
+                week.weekStart,
+                week.weekEnd,
+              ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: Colors.grey.shade600,
                 fontWeight: FontWeight.w600,
@@ -117,7 +122,7 @@ class _WeekCard extends StatelessWidget {
                 ),
               ),
               Text(
-                'TOTAL',
+                context.l10n.text('total').toUpperCase(),
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: Colors.grey.shade500,
                   letterSpacing: 1.2,
@@ -178,7 +183,10 @@ class _WeekCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    DateFormat('EEEE').format(day),
+                    DateFormat(
+                      'EEEE',
+                      context.l10n.localeTag,
+                    ).format(day),
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: isMatchReady
@@ -188,7 +196,7 @@ class _WeekCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    DateFormat.yMMMd().format(day),
+                    DateFormat.yMMMd(context.l10n.localeTag).format(day),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.grey.shade600,
                           fontWeight: FontWeight.w600,
@@ -196,7 +204,7 @@ class _WeekCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '${miles.toStringAsFixed(1)} miles  •  ${calories.toStringAsFixed(0)} cal',
+                    '${miles.toStringAsFixed(1)} ${context.l10n.text('miles').toLowerCase()}  •  ${calories.toStringAsFixed(0)} ${context.l10n.text('calories').toLowerCase()}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.grey.shade600,
                           fontWeight: FontWeight.w600,
@@ -222,7 +230,7 @@ class _WeekCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'STEPS',
+                      context.l10n.text('steps').toUpperCase(),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                             color: Colors.grey.shade500,
                             letterSpacing: 1.2,
@@ -295,9 +303,9 @@ class _WeekStatusRow extends StatelessWidget {
 
     final messages = <String>[
       if (missingPastDays > 0)
-        '$missingPastDays ${missingPastDays == 1 ? 'day' : 'days'} without walks',
+        context.l10n.daysWithoutWalks(missingPastDays),
       if (futureDays > 0)
-        '$futureDays ${futureDays == 1 ? 'day' : 'days'} remaining this week',
+        context.l10n.daysRemainingThisWeek(futureDays),
     ];
 
     return Container(
@@ -335,15 +343,15 @@ class _WeekSummaryRow extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _SummaryStat(
-            label: 'Active Days',
+            label: context.l10n.text('activeDays'),
             value: '${week.activeDays}',
           ),
           _SummaryStat(
-            label: 'Avg / Active Day',
+            label: context.l10n.text('avgActiveDay'),
             value: NumberFormat.decimalPattern().format(week.averageSteps),
           ),
           _SummaryStat(
-            label: '10K Days',
+            label: context.l10n.text('tenKDays'),
             value: '${week.goalDays}',
           ),
         ],
@@ -459,22 +467,25 @@ DateTime _startOfWeek(DateTime date) {
 DateTime _normalizeDate(DateTime date) =>
     DateTime(date.year, date.month, date.day);
 
-String _getWeekLabel(DateTime weekStart, DateTime now) {
+String _getWeekLabel(BuildContext context, DateTime weekStart, DateTime now) {
   final nowWeekStart = _startOfWeek(now);
   final diffInWeeks = nowWeekStart.difference(weekStart).inDays ~/ 7;
 
-  if (diffInWeeks == 0) return 'This Week';
-  if (diffInWeeks == 1) return 'Last Week';
-  return 'Week of ${DateFormat.MMMd().format(weekStart)}';
+  if (diffInWeeks == 0) return context.l10n.text('thisWeek');
+  if (diffInWeeks == 1) return context.l10n.text('lastWeek');
+  return context.l10n.weekOfLabel(
+    DateFormat.MMMd(context.l10n.localeTag).format(weekStart),
+  );
 }
 
-String _formatWeekRange(DateTime start, DateTime end) {
+String _formatWeekRange(BuildContext context, DateTime start, DateTime end) {
+  final locale = context.l10n.localeTag;
   final sameMonth = start.month == end.month && start.year == end.year;
   if (sameMonth) {
-    return '${DateFormat.MMMd().format(start)} - ${DateFormat.d().format(end)}';
+    return '${DateFormat.MMMd(locale).format(start)} - ${DateFormat.d(locale).format(end)}';
   }
   if (start.year == end.year) {
-    return '${DateFormat.MMMd().format(start)} - ${DateFormat.MMMd().format(end)}';
+    return '${DateFormat.MMMd(locale).format(start)} - ${DateFormat.MMMd(locale).format(end)}';
   }
-  return '${DateFormat.yMMMd().format(start)} - ${DateFormat.yMMMd().format(end)}';
+  return '${DateFormat.yMMMd(locale).format(start)} - ${DateFormat.yMMMd(locale).format(end)}';
 }

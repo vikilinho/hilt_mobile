@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
+
 class StepDetailView extends StatelessWidget {
   final WorkoutSession session;
 
@@ -14,7 +16,8 @@ class StepDetailView extends StatelessWidget {
     final miles = session.distance ?? (steps * 0.00047);
     final calories = session.calories ?? (steps * 0.04);
     final isMatchReady = steps >= 10000;
-    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(session.timestamp);
+    final locale = context.l10n.localeTag;
+    final dateStr = DateFormat('EEEE, MMMM d, yyyy', locale).format(session.timestamp);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0D), // Dark tactical background
@@ -23,7 +26,7 @@ class StepDetailView extends StatelessWidget {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(
-          "DAILY ACTIVITY",
+          context.l10n.text('dailyActivity').toUpperCase(),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: Colors.grey.shade400,
                 letterSpacing: 2.0,
@@ -96,7 +99,7 @@ class StepDetailView extends StatelessWidget {
                                   ),
                             ),
                             Text(
-                              "TOTAL STEPS",
+                              context.l10n.text('totalStepsLabel').toUpperCase(),
                               style: Theme.of(context)
                                   .textTheme
                                   .labelSmall
@@ -123,7 +126,7 @@ class StepDetailView extends StatelessWidget {
                   Expanded(
                     child: _buildMetricCard(
                       context,
-                      label: "MILES",
+                      label: context.l10n.text('miles').toUpperCase(),
                       value: miles.toStringAsFixed(1),
                       icon: Icons.straighten,
                     ),
@@ -132,7 +135,7 @@ class StepDetailView extends StatelessWidget {
                   Expanded(
                     child: _buildMetricCard(
                       context,
-                      label: "CALORIES",
+                      label: context.l10n.text('calories').toUpperCase(),
                       value: calories.toStringAsFixed(1),
                       icon: Icons.local_fire_department_outlined,
                     ),

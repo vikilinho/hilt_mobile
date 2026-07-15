@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hilt_core/hilt_core.dart';
+import '../l10n/app_localizations.dart';
 import '../workout_manager.dart';
 import '../widgets/history_summary.dart';
 import '../widgets/history_item_card.dart';
 import '../widgets/weekly_walks_view.dart';
 import 'post_workout_screen.dart';
+
+const String _promoHistoryTab = String.fromEnvironment(
+  'PROMO_HISTORY_TAB',
+  defaultValue: 'sessions',
+);
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -15,7 +21,7 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  int _selectedTab = 0; // 0 = SESSIONS, 1 = WALKS
+  int _selectedTab = _promoHistoryTab.toLowerCase() == 'walks' ? 1 : 0;
 
   @override
   Widget build(BuildContext context) {
@@ -62,8 +68,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
       child: Row(
         children: [
-          Expanded(child: _buildTabButton("SESSIONS", 0, theme)),
-          Expanded(child: _buildTabButton("WALKS", 1, theme)),
+          Expanded(
+            child: _buildTabButton(
+              context.l10n.text('sessions').toUpperCase(),
+              0,
+              theme,
+            ),
+          ),
+          Expanded(
+            child: _buildTabButton(
+              context.l10n.text('walks').toUpperCase(),
+              1,
+              theme,
+            ),
+          ),
         ],
       ),
     );
@@ -117,7 +135,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             Icon(Icons.history, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             Text(
-              "No workouts yet",
+              context.l10n.text('noWorkoutsYet'),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: Colors.grey.shade500,
                   ),
@@ -193,7 +211,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             Icon(Icons.directions_walk, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             Text(
-              "No walks recorded",
+              context.l10n.text('noWalksRecorded'),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: Colors.grey.shade500,
                   ),
@@ -216,7 +234,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     String? lastLabel;
 
     for (var s in sessions) {
-      final label = _getDateLabel(now, s.timestamp);
+      final label = _getDateLabel(context, now, s.timestamp);
       if (label != lastLabel) {
         items.add(label);
         lastLabel = label;
@@ -226,23 +244,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return items;
   }
 
-  String _getDateLabel(DateTime now, DateTime date) {
+  String _getDateLabel(BuildContext context, DateTime now, DateTime date) {
     final diff = now.difference(date).inDays;
     final isSameDay =
         now.year == date.year && now.month == date.month && now.day == date.day;
 
-    if (isSameDay) return "Today";
+    if (isSameDay) return context.l10n.text('today');
 
     final yesterday = now.subtract(const Duration(days: 1));
     final isYesterday = yesterday.year == date.year &&
         yesterday.month == date.month &&
         yesterday.day == date.day;
 
-    if (isYesterday) return "Yesterday";
+    if (isYesterday) return context.l10n.text('yesterday');
 
-    if (diff < 7) return "This Week";
-    if (diff < 30) return "This Month";
+    if (diff < 7) return context.l10n.text('thisWeek');
+    if (diff < 30) return context.l10n.text('thisMonth');
 
-    return "Older";
+    return context.l10n.text('older');
   }
 }

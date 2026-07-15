@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hilt_core/hilt_core.dart';
+import '../l10n/app_localizations.dart';
 
 class HistorySummary extends StatelessWidget {
   final List<WorkoutSession> sessions;
@@ -20,9 +21,11 @@ class HistorySummary extends StatelessWidget {
     int gradeB = 0;
 
     for (var s in sessions) {
-      if (s.grade == 'A')
+      if (s.grade == 'A') {
         gradeA++;
-      else if (s.grade == 'B') gradeB++;
+      } else if (s.grade == 'B') {
+        gradeB++;
+      }
     }
 
     return Card(
@@ -35,28 +38,32 @@ class HistorySummary extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildStatItem(context, "WORKOUTS", "$totalWorkouts"),
+            _buildStatItem(
+              context,
+              context.l10n.text('workoutsLabel').toUpperCase(),
+              "$totalWorkouts",
+            ),
             Container(width: 1, height: 40, color: Colors.grey.shade300),
-            _buildStatItem(context, "BEST GRADE",
+            _buildStatItem(context, context.l10n.text('bestGrade').toUpperCase(),
                 gradeA > 0 ? "A" : (gradeB > 0 ? "B" : "C")),
             Container(width: 1, height: 40, color: Colors.grey.shade300),
-            _buildStatItem(
-                context, "LAST", _getLastDate(sessions.first.timestamp)),
+            _buildStatItem(context, context.l10n.text('last').toUpperCase(),
+                _getLastDate(context, sessions.first.timestamp)),
           ],
         ),
       ),
     );
   }
 
-  String _getLastDate(DateTime date) {
+  String _getLastDate(BuildContext context, DateTime date) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final aDate = DateTime(date.year, date.month, date.day);
     final diff = today.difference(aDate).inDays;
 
-    if (diff == 0) return "Today";
-    if (diff == 1) return "Yesterday";
-    return "$diff days ago";
+    if (diff == 0) return context.l10n.text('today');
+    if (diff == 1) return context.l10n.text('yesterday');
+    return context.l10n.daysAgo(diff);
   }
 
   Widget _buildStatItem(BuildContext context, String label, String value) {

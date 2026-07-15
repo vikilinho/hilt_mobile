@@ -5,6 +5,7 @@ import 'package:hilt_core/hilt_core.dart';
 import 'package:provider/provider.dart';
 import 'package:hilt_mobile/src/workout_manager.dart';
 import 'package:hilt_mobile/src/screens/post_workout_screen.dart';
+import '../support/test_app.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal WorkoutManager stub
@@ -55,8 +56,8 @@ Widget _buildApp(
   final manager = _StubWorkoutManager();
   return ChangeNotifierProvider<WorkoutManager>.value(
     value: manager,
-    child: MaterialApp(
-      home: PostWorkoutSummaryScreen(
+    child: buildTestApp(
+      PostWorkoutSummaryScreen(
         session: session,
         cameraScreenBuilder: cameraScreenBuilder,
       ),

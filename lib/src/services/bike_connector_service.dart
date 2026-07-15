@@ -5,6 +5,8 @@ import 'package:flutter_ftms/flutter_ftms.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'app_permission_gate.dart';
+
 enum BikeConnectionStatus {
   disconnected,
   scanning,
@@ -51,12 +53,17 @@ class BikeConnectorService {
   }
 
   Future<void> requestPermissions() async {
-    await [
+    for (final permission in [
       Permission.bluetooth,
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.location,
-    ].request();
+    ]) {
+      await AppPermissionGate.request(
+        permission,
+        label: permission.toString(),
+      );
+    }
   }
 
   Future<void> scanAndConnect() async {

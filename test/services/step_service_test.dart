@@ -11,6 +11,7 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+import '../support/isar_test_bootstrap.dart';
 
 // Mock PathProvider so Isar can be opened
 class MockPathProviderPlatform extends Fake with MockPlatformInterfaceMixin implements PathProviderPlatform {
@@ -71,7 +72,7 @@ void main() {
       _NullStreamHandler(),
     );
 
-    await Isar.initializeIsarCore(download: true);
+    await initializeTestIsarCore();
   });
 
   group('StepService Gait Validation (Anti-Shake Filter)', () {
@@ -173,6 +174,94 @@ void main() {
           expect(stepService.dailySteps, 8, reason: 'Failed graduating 8 steps');
         }
       }
+    });
+
+    test('External step sync seeds the day and live sensor steps continue', () async {
+      await stepService.setExternalDailySteps(1000);
+      expect(stepService.dailySteps, 1000);
+
+      mockStepStream.add(getMockStep(5000));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1000);
+
+      mockStepStream.add(getMockStep(5010));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1010);
+    });
+
+    test('First raw sensor value displays immediately when no health total is available', () async {
+      mockStepStream.add(getMockStep(1900));
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(stepService.dailySteps, 1900);
+
+      mockStepStream.add(getMockStep(1910));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1910);
+    });
+
+    test('First raw sensor value at goal is not treated as today steps', () async {
+      mockStepStream.add(getMockStep(10000));
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(stepService.dailySteps, 0);
+    });
+
+    test('External step sync can correct a stale persisted value before first sensor event', () async {
+      stepService.dailySteps = 10000;
+
+      await stepService.setExternalDailySteps(1900);
+      expect(stepService.dailySteps, 1900);
+
+      mockStepStream.add(getMockStep(5000));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1900);
+
+      mockStepStream.add(getMockStep(5010));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1910);
+    });
+
+    test('External step sync can correct stale value after first sensor anchor event', () async {
+      await stepService.setExternalDailySteps(10000);
+      expect(stepService.dailySteps, 10000);
+
+      mockStepStream.add(getMockStep(5000));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 10000);
+
+      await stepService.setExternalDailySteps(1900);
+      expect(stepService.dailySteps, 1900);
+
+      mockStepStream.add(getMockStep(5010));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1910);
+    });
+
+    test('External seed keeps live updates when raw sensor total is lower than daily total', () async {
+      await stepService.setExternalDailySteps(1900);
+      expect(stepService.dailySteps, 1900);
+
+      mockStepStream.add(getMockStep(1000));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1900);
+
+      mockStepStream.add(getMockStep(1010));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(stepService.dailySteps, 1910);
+    });
+
+    test('External sync is ignored after live sensor has started for the day', () async {
+      await stepService.setExternalDailySteps(1000);
+      mockStepStream.add(getMockStep(5000));
+      await Future.delayed(const Duration(milliseconds: 50));
+      mockStepStream.add(getMockStep(5010));
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      expect(stepService.dailySteps, 1010);
+
+      await stepService.setExternalDailySteps(4000);
+      expect(stepService.dailySteps, 1010);
     });
   });
 }

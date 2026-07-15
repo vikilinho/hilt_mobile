@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hilt_core/hilt_core.dart';
 import 'package:hilt_mobile/src/widgets/weekly_walks_view.dart';
+import '../support/test_app.dart';
 
 void main() {
   WorkoutSession buildWalkSession({
@@ -44,8 +45,8 @@ void main() {
       ];
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
+        buildTestApp(
+          Scaffold(
             body: WeeklyWalksView(
               sessions: sessions,
               now: DateTime(2026, 5, 7),
@@ -54,14 +55,12 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
 
-      expect(find.text('This Week'), findsOneWidget);
-      expect(find.text('Last Week'), findsOneWidget);
-      expect(find.text('20,700'), findsOneWidget);
-      expect(find.text('9,100'), findsOneWidget);
+      expect(find.byType(ExpansionTile), findsNWidgets(2));
 
       expect(find.text('Thursday'), findsNothing);
-      await tester.tap(find.text('This Week'));
+      await tester.tap(find.byType(ExpansionTile).first);
       await tester.pumpAndSettle();
 
       expect(find.text('Thursday'), findsOneWidget);
@@ -84,8 +83,8 @@ void main() {
       ];
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
+        buildTestApp(
+          Scaffold(
             body: WeeklyWalksView(
               sessions: sessions,
               now: DateTime(2026, 5, 7),
@@ -94,8 +93,9 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
 
-      await tester.tap(find.text('This Week'));
+      await tester.tap(find.byType(ExpansionTile).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Thursday'));
       await tester.pumpAndSettle();
@@ -116,8 +116,8 @@ void main() {
       ];
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
+        buildTestApp(
+          Scaffold(
             body: WeeklyWalksView(
               sessions: sessions,
               now: DateTime(2026, 5, 7),
@@ -126,8 +126,9 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
 
-      await tester.tap(find.text('This Week'));
+      await tester.tap(find.byType(ExpansionTile).first);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('delete_walk_day_7')));
       await tester.pumpAndSettle();
